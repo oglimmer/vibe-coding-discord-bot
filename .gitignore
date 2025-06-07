@@ -1,0 +1,8 @@
+.env
+.idea/
+CACHEDIR.TAG
+**/__pycache__/
+bin/
+bot.log
+lib/
+pyvenv.cfg

@@ -1,0 +1,26 @@
+
+services:
+  mariadb:
+    image: mariadb
+    environment:
+      - MARIADB_ROOT_PASSWORD=root
+      - MARIADB_DATABASE=vibe-bot
+      - MARIADB_USER=vibe-bot
+      - MARIADB_PASSWORD=foobar
+    healthcheck:
+      test: mariadb -uvibe-bot -pfoobar vibe-bot -e "select 1"
+      interval: 3s
+      timeout: 60s
+      retries: 5
+      start_period: 10s
+      start_interval: 3s
+    ports:
+      - "3306:3306"
+  bot:
+    build: .
+    environment:
+      - DB_HOST=mariadb
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+    depends_on:
+        mariadb:
+            condition: service_healthy
