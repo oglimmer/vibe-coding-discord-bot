@@ -9,6 +9,7 @@ from config import Config, setup_logging
 from database import DatabaseManager
 from handlers.message_handler import MessageHandler
 from commands.greetings_command import setup as setup_greetings_command
+from commands.game_1337_command import setup as setup_game_1337_command
 
 logger = setup_logging()
 
@@ -16,6 +17,7 @@ class DiscordBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
+        intents.members = True
         intents.guilds = True
         
         super().__init__(
@@ -33,6 +35,7 @@ class DiscordBot(commands.Bot):
             self.message_handler = MessageHandler(self.db_manager)
             
             await setup_greetings_command(self, self.db_manager)
+            await setup_game_1337_command(self, self.db_manager)
             
             await self.tree.sync()
             logger.info("Command tree synced successfully")
