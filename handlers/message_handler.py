@@ -8,10 +8,36 @@ logger = logging.getLogger(__name__)
 class MessageHandler:
     def __init__(self, db_manager: DatabaseManager):
         self.db_manager = db_manager
-        self.greeting_patterns = [
-            r'\b(morning|good morning)\b',
-            r'\bgn\b'
+        
+        # English greetings
+        english_greetings = [
+            "morning", "good morning", "gm", "hello", "hi", "hey",
+            "good evening", "evening", "gn", "good night",
+            "yo", "sup", "whatsup", "what's up", "howdy"
         ]
+        
+        # German greetings
+        german_greetings = [
+            "guten morgen", "morgen", "moin", "moin moin",
+            "servus", "hallo", "tach", "tag", "guten tag",
+            "guten abend", "abend", "n8", "nacht", "gute nacht",
+            "tschüss", "ciao", "bye", "tschau"
+        ]
+        
+        # Regional variations
+        regional_greetings = [
+            "grüezi", "grüß gott", "pfiat di", "baba"
+        ]
+        
+        # International greetings
+        international_greetings = [
+            "salut", "bonjour", "bonsoir", "buongiorno",
+            "buenos días", "buenas noches", "hola"
+        ]
+        
+        # Combine all greetings and create regex patterns
+        all_greetings = english_greetings + german_greetings + regional_greetings + international_greetings
+        self.greeting_patterns = [rf'\b{re.escape(greeting)}\b' for greeting in all_greetings]
     
     async def handle_message(self, message):
         if message.author.bot:
@@ -45,11 +71,11 @@ class MessageHandler:
             )
             
             if success:
-                await message.reply("👋")
+                await message.add_reaction("👋")
                 logger.info(f"Responded to greeting from {username} ({user_id})")
             else:
                 logger.error(f"Failed to save greeting from {username} ({user_id})")
                 
         except Exception as e:
             logger.error(f"Error handling greeting: {e}")
-            await message.reply("👋")
+            await message.add_reaction("👋")
