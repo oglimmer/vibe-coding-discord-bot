@@ -204,64 +204,105 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
         logger.debug("Role update process completed")
 
     async def _update_guild_roles(self, guild, winner_today, top_14_day, top_365_day):
-        """Update roles for a specific guild"""
+        """Update roles for a specific guild using database role tracking"""
         logger.info(f"Processing guild: {guild.name} (ID: {guild.id})")
-        member = guild.get_member(winner_today['user_id'])
-        if not member:
-            logger.info(f"Winner not found in guild {guild.name}")
-            return
-
-        logger.debug(f"Found winner {member.display_name} in guild {guild.name}")
-
+        
         sergeant_role = guild.get_role(Config.SERGEANT_ROLE_ID) if Config.SERGEANT_ROLE_ID else None
         commander_role = guild.get_role(Config.COMMANDER_ROLE_ID) if Config.COMMANDER_ROLE_ID else None
         general_role = guild.get_role(Config.GENERAL_ROLE_ID) if Config.GENERAL_ROLE_ID else None
 
         logger.info(f"Roles found - Sergeant: {sergeant_role}, Commander: {commander_role}, General: {general_role}")
 
-        # Remove all roles first
-        roles_to_remove = [r for r in [sergeant_role, commander_role, general_role] if r and r in member.roles]
-        if roles_to_remove:
-            logger.info(f"Removing roles from {member.display_name}: {[r.name for r in roles_to_remove]}")
-            await member.remove_roles(*roles_to_remove)
+        # Get current role assignments from database
+        current_assignments = self.db_manager.get_all_role_assignments(guild.id)
+        logger.debug(f"Current role assignments: {current_assignments}")
 
-        # Assign appropriate role
-        if top_365_day and member.id == top_365_day['user_id'] and general_role:
-            logger.info(f"Assigning General role to {member.display_name}")
-            await member.add_roles(general_role)
-        elif top_14_day and member.id == top_14_day['user_id'] and commander_role:
-            logger.info(f"Assigning Commander role to {member.display_name}")
-            await member.add_roles(commander_role)
-        elif sergeant_role:
-            logger.info(f"Assigning Sergeant role to {member.display_name}")
-            await member.add_roles(sergeant_role)
+        # Remove previous role assignments from Discord members
+        await self._remove_previous_role_assignments(guild, current_assignments)
 
-        # Update roles for other members who should have commander/general
-        await self._update_other_member_roles(guild, member, top_14_day, top_365_day, 
-                                             sergeant_role, commander_role, general_role)
+        # Determine new role assignments
+        new_assignments = self._determine_new_role_assignments(winner_today, top_14_day, top_365_day)
+        logger.debug(f"New role assignments: {new_assignments}")
 
-    async def _update_other_member_roles(self, guild, current_winner, top_14_day, top_365_day,
-                                       sergeant_role, commander_role, general_role):
-        """Update roles for non-winning members who should have special roles"""
-        if top_365_day and top_365_day['user_id'] != current_winner.id and general_role:
-            general_member = guild.get_member(top_365_day['user_id'])
-            if general_member:
-                logger.debug(f"Updating General role for {general_member.display_name}")
-                await general_member.remove_roles(
-                    *[r for r in [sergeant_role, commander_role] if r and r in general_member.roles]
-                )
-                if general_role not in general_member.roles:
-                    await general_member.add_roles(general_role)
+        # Apply new role assignments
+        await self._apply_new_role_assignments(guild, new_assignments, sergeant_role, commander_role, general_role)
 
-        if (top_14_day and top_14_day['user_id'] != current_winner.id and 
-            top_14_day['user_id'] != (top_365_day['user_id'] if top_365_day else None) and commander_role):
-            commander_member = guild.get_member(top_14_day['user_id'])
-            if commander_member:
-                logger.debug(f"Updating Commander role for {commander_member.display_name}")
-                if sergeant_role and sergeant_role in commander_member.roles:
-                    await commander_member.remove_roles(sergeant_role)
-                if commander_role not in commander_member.roles:
-                    await commander_member.add_roles(commander_role)
+    async def _remove_previous_role_assignments(self, guild, current_assignments):
+        """Remove roles from users who currently have them"""
+        for assignment in current_assignments:
+            member = guild.get_member(assignment['user_id'])
+            if member:
+                role = guild.get_role(assignment['role_id'])
+                if role and role in member.roles:
+                    logger.info(f"Removing {assignment['role_type']} role from {member.display_name}")
+                    await member.remove_roles(role)
+                else:
+                    logger.warning(f"Role {assignment['role_type']} not found or not assigned to {member.display_name}")
+            else:
+                logger.warning(f"Member {assignment['user_id']} not found in guild {guild.name}")
+
+    def _determine_new_role_assignments(self, winner_today, top_14_day, top_365_day):
+        """Determine who should get which roles based on game statistics"""
+        assignments = {}
+        
+        # Start with today's winner getting Sergeant
+        assignments['sergeant'] = winner_today['user_id']
+        
+        # Override with Commander if winner is top 14-day player
+        if top_14_day and winner_today['user_id'] == top_14_day['user_id']:
+            assignments['commander'] = winner_today['user_id']
+            if 'sergeant' in assignments and assignments['sergeant'] == winner_today['user_id']:
+                del assignments['sergeant']
+        
+        # Override with General if winner is top 365-day player
+        if top_365_day and winner_today['user_id'] == top_365_day['user_id']:
+            assignments['general'] = winner_today['user_id']
+            # Remove lower roles
+            if 'commander' in assignments and assignments['commander'] == winner_today['user_id']:
+                del assignments['commander']
+            if 'sergeant' in assignments and assignments['sergeant'] == winner_today['user_id']:
+                del assignments['sergeant']
+        
+        # Assign special roles to non-winners
+        if top_365_day and top_365_day['user_id'] != winner_today['user_id']:
+            assignments['general'] = top_365_day['user_id']
+        
+        if (top_14_day and top_14_day['user_id'] != winner_today['user_id'] and 
+            top_14_day['user_id'] != (top_365_day['user_id'] if top_365_day else None)):
+            assignments['commander'] = top_14_day['user_id']
+        
+        return assignments
+
+    async def _apply_new_role_assignments(self, guild, assignments, sergeant_role, commander_role, general_role):
+        """Apply new role assignments to Discord members and update database"""
+        role_objects = {
+            'sergeant': sergeant_role,
+            'commander': commander_role, 
+            'general': general_role
+        }
+        
+        for role_type, user_id in assignments.items():
+            role = role_objects.get(role_type)
+            if not role:
+                logger.warning(f"Role {role_type} not configured, skipping assignment")
+                continue
+                
+            member = guild.get_member(user_id)
+            if not member:
+                logger.warning(f"Member {user_id} not found in guild {guild.name}, skipping {role_type} assignment")
+                continue
+            
+            # Add role to Discord member
+            if role not in member.roles:
+                logger.info(f"Assigning {role_type} role to {member.display_name}")
+                await member.add_roles(role)
+            else:
+                logger.debug(f"{member.display_name} already has {role_type} role")
+            
+            # Update database
+            success = self.db_manager.set_role_assignment(guild.id, user_id, role_type, role.id)
+            if not success:
+                logger.error(f"Failed to update database for {role_type} assignment to {member.display_name}")
 
     async def _announce_general_bet(self, user, play_time):
         """Announce when a General places a bet"""

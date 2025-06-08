@@ -88,6 +88,21 @@ class DatabaseManager:
                 )
             """)
             
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS game_1337_roles (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    guild_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    role_type ENUM('sergeant', 'commander', 'general') NOT NULL,
+                    role_id BIGINT NOT NULL,
+                    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY unique_guild_role (guild_id, role_type),
+                    INDEX idx_guild_user (guild_id, user_id),
+                    INDEX idx_user_id (user_id)
+                )
+            """)
+            
             self.connection.commit()
             logger.info("Database tables created successfully")
         except mariadb.Error as e:
@@ -308,6 +323,86 @@ class DatabaseManager:
         except mariadb.Error as e:
             logger.error(f"Error fetching daily winner: {e}")
             return None
+
+    def set_role_assignment(self, guild_id, user_id, role_type, role_id):
+        """Set or update role assignment for a user in a specific guild"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                INSERT INTO game_1337_roles (guild_id, user_id, role_type, role_id)
+                VALUES (?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                user_id = VALUES(user_id),
+                role_id = VALUES(role_id),
+                updated_at = CURRENT_TIMESTAMP
+            """, (guild_id, user_id, role_type, role_id))
+            
+            self.connection.commit()
+            logger.info(f"Set {role_type} role assignment for user {user_id} in guild {guild_id}")
+            return True
+        except mariadb.Error as e:
+            logger.error(f"Error setting role assignment: {e}")
+            return False
+    
+    def get_role_assignment(self, guild_id, role_type):
+        """Get current role assignment for a specific role type in a guild"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT user_id, role_id
+                FROM game_1337_roles 
+                WHERE guild_id = ? AND role_type = ?
+            """, (guild_id, role_type))
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'user_id': result[0],
+                    'role_id': result[1]
+                }
+            return None
+        except mariadb.Error as e:
+            logger.error(f"Error fetching role assignment: {e}")
+            return None
+    
+    def get_all_role_assignments(self, guild_id):
+        """Get all current role assignments for a guild"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT user_id, role_type, role_id
+                FROM game_1337_roles 
+                WHERE guild_id = ?
+            """, (guild_id,))
+            
+            results = cursor.fetchall()
+            return [
+                {
+                    'user_id': row[0],
+                    'role_type': row[1],
+                    'role_id': row[2]
+                }
+                for row in results
+            ]
+        except mariadb.Error as e:
+            logger.error(f"Error fetching all role assignments: {e}")
+            return []
+    
+    def remove_role_assignment(self, guild_id, role_type):
+        """Remove role assignment for a specific role type in a guild"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                DELETE FROM game_1337_roles 
+                WHERE guild_id = ? AND role_type = ?
+            """, (guild_id, role_type))
+            
+            self.connection.commit()
+            logger.info(f"Removed {role_type} role assignment in guild {guild_id}")
+            return True
+        except mariadb.Error as e:
+            logger.error(f"Error removing role assignment: {e}")
+            return False
 
     def close(self):
         if self.connection:
