@@ -1,9 +1,8 @@
 import unittest
-from unittest.mock import Mock, AsyncMock, patch
-import asyncio
+from unittest.mock import Mock, AsyncMock
 from handlers.message_handler import MessageHandler
 
-class TestMessageHandler(unittest.TestCase):
+class TestMessageHandler(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.db_manager = Mock()
         self.message_handler = MessageHandler(self.db_manager)
@@ -17,12 +16,12 @@ class TestMessageHandler(unittest.TestCase):
         self.assertTrue(self.message_handler._is_greeting("gn"))
         self.assertTrue(self.message_handler._is_greeting("gn everyone"))
         self.assertTrue(self.message_handler._is_greeting("GN"))
-    
+
     def test_is_not_greeting(self):
-        self.assertFalse(self.message_handler._is_greeting("hello"))
+        self.assertFalse(self.message_handler._is_greeting("huhu"))
         self.assertFalse(self.message_handler._is_greeting("gnome"))
-        self.assertFalse(self.message_handler._is_greeting("morning coffee"))
-    
+        self.assertFalse(self.message_handler._is_greeting("mourning coffee"))
+
     async def test_handle_greeting_message(self):
         message = Mock()
         message.author.bot = False
@@ -32,13 +31,14 @@ class TestMessageHandler(unittest.TestCase):
         message.guild.id = 67890
         message.channel.id = 54321
         message.reply = AsyncMock()
-        
+        message.add_reaction = AsyncMock()
+
         self.db_manager.save_greeting.return_value = True
-        
+
         await self.message_handler._handle_greeting(message)
-        
+
         self.db_manager.save_greeting.assert_called_once()
-        message.reply.assert_called_once_with("👋")
+        message.add_reaction.assert_called_once_with("👋")
 
 if __name__ == '__main__':
     unittest.main()
