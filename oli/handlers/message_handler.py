@@ -1,6 +1,5 @@
 import logging
 import re
-from datetime import datetime
 from database import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -8,31 +7,39 @@ logger = logging.getLogger(__name__)
 class MessageHandler:
     def __init__(self, db_manager: DatabaseManager):
         self.db_manager = db_manager
-        
+
         # English greetings
         english_greetings = [
-            "morning", "good morning", "gm", "hello", "hi", "hey",
-            "good evening", "evening", "gn", "good night",
-            "yo", "sup", "whatsup", "what's up", "howdy"
+            "morning", "good morning", "gm", "gn", "good night",
+            "hello", "hi", "hey", "good evening", "evening",
+            "yo", "sup", "whatsup", "what's up", "howdy",
+            "hiya", "heya", "hi there", "greetings", "hey there",
+            "top of the morning", "nighty night", "good day"
         ]
-        
+
         # German greetings
         german_greetings = [
             "guten morgen", "morgen", "moin", "moin moin",
-            "servus", "hallo", "tach", "tag", "guten tag",
-            "guten abend", "abend", "n8", "nacht", "gute nacht",
-            "tschüss", "ciao", "bye", "tschau"
+            "servus", "hallo", "hi", "hey", "tach", "tag",
+            "guten tag", "guten abend", "abend", "n8", "nacht",
+            "gute nacht", "tschüss", "ciao", "bye", "tschau",
+            "grüß dich", "na", "alles klar", "na du", "ey", "was geht"
         ]
-        
-        # Regional variations
+
+        # Regional variations (Austria/Switzerland)
         regional_greetings = [
-            "grüezi", "grüß gott", "pfiat di", "baba"
+            "grüezi", "grüß gott", "pfiat di", "baba",
+            "hoi", "salü", "servas", "ade", "tschau zäme",
+            "griaß di", "grüzi mitenand", "habedere"
         ]
-        
+
         # International greetings
         international_greetings = [
             "salut", "bonjour", "bonsoir", "buongiorno",
-            "buenos días", "buenas noches", "hola"
+            "buenos días", "buenas noches", "hola",
+            "namaste", "shalom", "ciao", "konnichiwa",
+            "annyeong", "hej", "hallå", "hei", "hola amigo",
+            "ola", "ahlan", "salaam", "merhaba", "dobry den"
         ]
         
         # Combine all greetings and create regex patterns

@@ -10,168 +10,179 @@ class GreetingsCommand(commands.Cog):
     def __init__(self, bot, db_manager: DatabaseManager):
         self.bot = bot
         self.db_manager = db_manager
-    
-    @discord.app_commands.command(name="greetings", description="Show all users who have greeted today")
+
+    @staticmethod
+    def format_time(dt) -> str:
+        from datetime import timedelta
+        if isinstance(dt, timedelta):
+            # Convert timedelta to hours:minutes format
+            total_seconds = int(dt.total_seconds())
+            hours, remainder = divmod(total_seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+            return f"{hours:02d}:{minutes:02d}"
+        else:
+            return dt.strftime("%H:%M")
+
+    @discord.app_commands.command(name="greetings", description="Show today's greeting activity")
     async def greetings(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         try:
-            today = datetime.now().date()
-            greetings_data = self.db_manager.get_daily_greetings(today)
-            
-            if not greetings_data:
-                embed = discord.Embed(
-                    description=f"""
-> ## {today.strftime('%B %d, %Y')}
-> 
-> **No greetings yet today**
-> 
-> *Be the first to say good morning!*
-                    """,
-                    color=0x2F3136,
-                    timestamp=datetime.now()
-                )
-                await interaction.response.send_message(embed=embed)
-                return
-            
-            greeting_count = len(greetings_data)
-            unique_users = len(set(g['user_id'] for g in greetings_data))
-            
-            # Create motivational message
-            if greeting_count >= 10:
-                vibe = "Amazing activity today"
-                vibe_desc = "The community is thriving"
-            elif greeting_count >= 5:
-                vibe = "Great community spirit"
-                vibe_desc = "Keep up the good energy"
-            else:
-                vibe = "Growing stronger each day"
-                vibe_desc = "Every greeting counts"
-            
-            avg_per_person = round(greeting_count/unique_users, 1) if unique_users > 0 else 0
-            
-            # Modern card-style embed
+            guild_id = interaction.guild.id if interaction.guild else None
+            # adapt this call to your database layer
+            greetings = self.bot.db_manager.get_todays_greetings(guild_id)
+
             embed = discord.Embed(
-                description=f"""
-> ## {today.strftime('%B %d, %Y')}
-> 
-> **{greeting_count}** greetings from **{unique_users}** members
-> 
-> `{greeting_count} messages` • `{unique_users} people` • `{avg_per_person} avg`
-> 
-> *{vibe} — {vibe_desc}*
-                """,
-                color=0x2F3136,
-                timestamp=datetime.now()
+                title="Today's Greetings 👋",
+                color=discord.Color.green(),
+                timestamp=datetime.utcnow()
             )
-            
-            # Create recent greetings list with minimal design
-            if greetings_data:
-                greeting_lines = []
-                for i, greeting in enumerate(greetings_data[:5]):
-                    # Convert timedelta to time string
-                    td = greeting['greeting_time']
-                    hours, remainder = divmod(td.total_seconds(), 3600)
-                    minutes, _ = divmod(remainder, 60)
-                    time_str = f"{int(hours):02d}:{int(minutes):02d}"
-                    
-                    # Clean message truncation
-                    greeting_text = greeting['greeting_message'][:30] + "..." if len(greeting['greeting_message']) > 30 else greeting['greeting_message']
-                    
-                    # Minimal ranking system
-                    rank = ["①", "②", "③", "④", "⑤"][i]
-                    greeting_lines.append(f"`{time_str}` **{greeting['username']}** — {greeting_text}")
-                
-                recent_greetings = "\n".join(greeting_lines)
-                
-                # Show remaining count
-                remaining_text = ""
-                if len(greetings_data) > 5:
-                    remaining = len(greetings_data) - 5
-                    remaining_text = f"\n\n*+{remaining} more today*"
-                
-                embed.add_field(
-                    name="Recent Activity",
-                    value=f"```\n{recent_greetings}\n```{remaining_text}",
-                    inline=False
-                )
-            
-            await interaction.response.send_message(embed=embed)
-            logger.info(f"Greetings command executed by {interaction.user.display_name}")
-            
+
+            if not greetings:
+                embed.description = "No one has greeted today yet! Be the first to say good morning! 🌅"
+                embed.color = discord.Color.orange()
+            else:
+                user_counts = {}
+                latest_times = {}
+                for g in greetings:
+                    name = g.username
+                    user_counts.setdefault(name, 0)
+                    user_counts[name] += 1
+
+                    prev = latest_times.get(name, g.greeting_time)
+                    latest_times[name] = max(prev, g.greeting_time)
+
+                sorted_users = sorted(user_counts.items(), key=lambda x: x[1], reverse=True)
+                lines = []
+                for i, (user, count) in enumerate(sorted_users, 1):
+                    time_str = self.format_time(latest_times[user])
+                    lines.append(f"{i}. **{user}** - {count}x (latest: {time_str})")
+
+                embed.description = "\n".join(lines)
+                embed.add_field(name="Total Greetings Today", value=str(len(greetings)), inline=True)
+                embed.add_field(name="Unique Users", value=str(len(user_counts)), inline=True)
+
+                first = greetings[0]
+                last = greetings[-1]
+                embed.add_field(name="First Greeting", value=f"{first.username} at {self.format_time(first.greeting_time)}", inline=True)
+                if len(greetings) > 1:
+                    embed.add_field(name="Latest Greeting", value=f"{last.username} at {self.format_time(last.greeting_time)}", inline=True)
+
+            embed.set_footer(
+                text="Say greetings like 'gm', 'moin', 'servus', etc. Use /greeting-help for all options.",
+                icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None
+            )
+
+            await interaction.followup.send(embed=embed)
+            logger.info(f"Greetings command used by {interaction.user} in {interaction.guild}")
         except Exception as e:
-            logger.error(f"Error in greetings command: {e}")
-            await interaction.response.send_message(
-                "Sorry, there was an error retrieving the greetings data.", 
-                ephemeral=True
+            logger.error(f"Error in greetings command: {e}", exc_info=True)
+            error_embed = discord.Embed(
+                title="❌ Error",
+                description="Sorry, I couldn't retrieve the greetings data right now. Please try again later.",
+                color=discord.Color.red()
             )
+            await interaction.followup.send(embed=error_embed, ephemeral=True)
+
 
     @discord.app_commands.command(name="greetings-help", description="Learn about the greetings system and supported languages")
     async def greetings_help(self, interaction: discord.Interaction):
+        """
+        Display all possible greetings that the bot recognizes.
+
+        Args:
+            interaction: Discord interaction object
+        """
+        await interaction.response.defer()
         try:
             embed = discord.Embed(
-                description=f"""
-> ## Greetings System Help
-> 
-> **How it works**
-> Send any greeting message and I'll react with 👋
-> 
-> **Commands**
-> `/greetings` — View today's greeting activity
-> `/greetings-help` — Show this help message
-                """,
-                color=0x2F3136,
-                timestamp=datetime.now()
+                title="🌍 Recognized Greetings",
+                description="The bot recognizes all of these greetings and will react with 👋:",
+                color=discord.Color.blue(),
+                timestamp=datetime.utcnow()
             )
-            
-            # Supported languages
-            languages_text = """
-**English**
-`morning` `good morning` `gm` `hello` `hi` `hey`
-`good evening` `evening` `gn` `good night`
-`yo` `sup` `whatsup` `what's up` `howdy`
 
-**German**
-`guten morgen` `morgen` `moin` `moin moin` `servus`
-`hallo` `tach` `tag` `guten tag` `guten abend`
-`abend` `n8` `nacht` `gute nacht` `tschüss`
-`ciao` `bye` `tschau`
+            # English greetings
+            english_greetings = [
+                "morning", "good morning", "gm", "gn", "good night",
+                "hello", "hi", "hey", "good evening", "evening",
+                "yo", "sup", "whatsup", "what's up", "howdy",
+                "hiya", "heya", "hi there", "greetings", "hey there",
+                "top of the morning", "nighty night", "good day"
+            ]
 
-**Regional**
-`grüezi` `grüß gott` `pfiat di` `baba`
+            # German greetings
+            german_greetings = [
+                "guten morgen", "morgen", "moin", "moin moin",
+                "servus", "hallo", "hi", "hey", "tach", "tag",
+                "guten tag", "guten abend", "abend", "n8", "nacht",
+                "gute nacht", "tschüss", "ciao", "bye", "tschau",
+                "grüß dich", "na", "alles klar", "na du", "ey", "was geht"
+            ]
 
-**International**
-`salut` `bonjour` `bonsoir` `buongiorno`
-`buenos días` `buenas noches` `hola`
-            """
-            
+            # Regional variations (Austria/Switzerland)
+            regional_greetings = [
+                "grüezi", "grüß gott", "pfiat di", "baba",
+                "hoi", "salü", "servas", "ade", "tschau zäme",
+                "griaß di", "grüzi mitenand", "habedere"
+            ]
+
+            # International greetings
+            international_greetings = [
+                "salut", "bonjour", "bonsoir", "buongiorno",
+                "buenos días", "buenas noches", "hola",
+                "namaste", "shalom", "ciao", "konnichiwa",
+                "annyeong", "hej", "hallå", "hei", "hola amigo",
+                "ola", "ahlan", "salaam", "merhaba", "dobry den"
+            ]
+
             embed.add_field(
-                name="Supported Greetings",
-                value=languages_text,
+                name="🇺🇸 English",
+                value=", ".join([f"`{g}`" for g in english_greetings]),
                 inline=False
             )
-            
-            features_text = """
-• **Auto-detection** — I recognize greetings in any message
-• **Multi-language** — Support for 40+ greetings across languages
-• **Daily tracking** — All greetings are saved and displayed
-• **Statistics** — View community activity and engagement
-• **Simple reactions** — Clean 👋 responses without message spam
-            """
-            
+
             embed.add_field(
-                name="Features",
-                value=features_text,
+                name="🇩🇪 German",
+                value=", ".join([f"`{g}`" for g in german_greetings]),
                 inline=False
             )
-            
-            await interaction.response.send_message(embed=embed)
-            logger.info(f"Greetings help command executed by {interaction.user.display_name}")
-            
+
+            embed.add_field(
+                name="🏔️ Regional (Austria/Switzerland)",
+                value=", ".join([f"`{g}`" for g in regional_greetings]),
+                inline=False
+            )
+
+            embed.add_field(
+                name="🌐 International",
+                value=", ".join([f"`{g}`" for g in international_greetings]),
+                inline=False
+            )
+
+            embed.add_field(
+                name="💡 How it works",
+                value="Simply type any of these greetings in chat and the bot will:\n• React with 👋\n• Count it in your daily greeting stats\n• Show it in `/greetings` command",
+                inline=False
+            )
+
+            embed.set_footer(
+                text="New greetings can be added by request! Contact an admin.",
+                icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None
+            )
+
+            await interaction.followup.send(embed=embed)
+            logger.info(f"Greeting help command used by {interaction.user}")
+
         except Exception as e:
-            logger.error(f"Error in greetings help command: {e}")
-            await interaction.response.send_message(
-                "Sorry, there was an error displaying the help information.", 
-                ephemeral=True
+            logger.error(f"Error in greeting help command: {e}", exc_info=True)
+
+            error_embed = discord.Embed(
+                title="❌ Error",
+                description="Sorry, I couldn't retrieve the greeting information right now. Please try again later.",
+                color=discord.Color.red()
             )
+
+            await interaction.followup.send(embed=error_embed, ephemeral=True)
 
 async def setup(bot, db_manager):
     await bot.add_cog(GreetingsCommand(bot, db_manager))
