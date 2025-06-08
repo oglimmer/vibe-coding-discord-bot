@@ -63,6 +63,7 @@ class Game1337Command(commands.Cog):
 
             # Cancel existing task if any
             if self.winner_determination_task:
+                logger.warning(f"Cancelling existing winner determination task")
                 self.winner_determination_task.cancel()
 
             # Schedule the winner determination task
@@ -76,6 +77,7 @@ class Game1337Command(commands.Cog):
     async def _delayed_winner_determination(self, delay_seconds):
         """Wait for the exact delay and then determine the winner"""
         try:
+            logger.info(f"Waiting {delay_seconds:.3f} seconds for winner determination")
             await asyncio.sleep(delay_seconds)
 
             # Verify we're at the right time (within 100ms tolerance)
