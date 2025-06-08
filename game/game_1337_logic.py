@@ -18,6 +18,7 @@ class Game1337Logic:
     
     def __init__(self, db_manager):
         self.db_manager = db_manager
+        self._daily_win_times = {}  # Cache for daily win times: {date: datetime}
     
     def parse_game_start_time(self) -> time:
         """Parse the game start time from configuration"""
@@ -38,17 +39,32 @@ class Game1337Logic:
         """Get yesterday's date"""
         return (datetime.now() - timedelta(days=1)).date()
 
-    def get_win_time(self) -> datetime:
-        """Generate a random win time within the game window"""
-        now = datetime.now()
+    def get_daily_win_time(self, game_date: Optional[date] = None) -> datetime:
+        """
+        Get or generate the daily win time for a specific date.
+        The win time is generated only once per day and cached in memory.
+        """
+        if game_date is None:
+            game_date = self.get_game_date()
+        
+        # Check if we already have the win time for this date
+        if game_date in self._daily_win_times:
+            logger.debug(f"Using cached win time for {game_date}: {self.format_time_with_ms(self._daily_win_times[game_date])}")
+            return self._daily_win_times[game_date]
+        
+        # Generate new win time for this date
         game_start_time = self.parse_game_start_time()
-        game_datetime = datetime.combine(now.date(), game_start_time)
+        game_datetime = datetime.combine(game_date, game_start_time)
 
         # Random time within 1 minute (60000ms) after game start
         random_ms = random.randint(0, 60000)
         win_time = game_datetime + timedelta(milliseconds=random_ms)
-        logger.debug(
-            f"Generated win time: {self.format_time_with_ms(win_time)} "
+        
+        # Cache the win time
+        self._daily_win_times[game_date] = win_time
+        
+        logger.info(
+            f"Generated NEW win time for {game_date}: {self.format_time_with_ms(win_time)} "
             f"(base: {self.format_time_with_ms(game_datetime)}, +{random_ms}ms)"
         )
         return win_time

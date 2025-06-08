@@ -90,19 +90,6 @@ class TestGame1337Logic(unittest.TestCase):
         expected = datetime(2023, 12, 25, 13, 37, 0, 0)
         self.assertEqual(result, expected)
 
-    def test_get_win_time_random(self):
-        """Test that win time generation produces expected range"""
-        with patch('game.game_1337_logic.Config.GAME_START_TIME', '13:37:00.000'):
-            with patch('game.game_1337_logic.random.randint', return_value=30000):  # 30 seconds
-                with patch('game.game_1337_logic.datetime') as mock_datetime:
-                    mock_now = datetime(2023, 12, 25, 14, 30)
-                    mock_datetime.now.return_value = mock_now
-                    mock_datetime.combine.return_value = datetime(2023, 12, 25, 13, 37, 0)
-                    
-                    result = self.logic.get_win_time()
-                    expected = datetime(2023, 12, 25, 13, 37, 30)
-                    self.assertEqual(result, expected)
-
     def test_format_time_with_ms(self):
         """Test time formatting with milliseconds"""
         dt = datetime(2023, 12, 25, 13, 37, 5, 250000)

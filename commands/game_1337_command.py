@@ -105,7 +105,26 @@ class Game1337Command(commands.Cog):
     async def _determine_daily_winner(self):
         """Determine the daily winner using game logic"""
         game_date = self.game_logic.get_game_date()
-        win_time = self.game_logic.get_win_time()
+        win_time = self.game_logic.get_daily_win_time(game_date)
+
+        # Wait until the exact win_time passes with millisecond precision
+        now = datetime.now()
+        if now < win_time:
+            wait_seconds = (win_time - now).total_seconds()
+            logger.info(f"Waiting {wait_seconds:.3f} seconds until win time: {self.game_logic.format_time_with_ms(win_time)}")
+            
+            # Use asyncio.sleep for most of the wait, but switch to busy-wait for final 10ms
+            if wait_seconds > 0.01:  # More than 10ms to wait
+                await asyncio.sleep(wait_seconds - 0.01)  # Sleep until 10ms before target
+            
+            # High-precision busy-wait for the final milliseconds
+            while datetime.now() < win_time:
+                await asyncio.sleep(0.0001)  # Very short sleep to yield control
+            
+            # Verify we hit the timing correctly
+            actual_time = datetime.now()
+            time_diff = (actual_time - win_time).total_seconds() * 1000  # Convert to milliseconds
+            logger.info(f"Winner determination triggered at: {self.game_logic.format_time_with_ms(actual_time)} (diff: {time_diff:.1f}ms)")
 
         winner_result = self.game_logic.determine_winner(game_date, win_time)
         
