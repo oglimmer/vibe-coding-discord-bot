@@ -169,17 +169,17 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
         try:
             logger.debug("Starting role update process")
             if not any([Config.SERGEANT_ROLE_ID, Config.COMMANDER_ROLE_ID, Config.GENERAL_ROLE_ID]):
-                logger.debug("No role IDs configured, skipping role update")
+                logger.warn("No role IDs configured, skipping role update")
                 return
 
             game_date = self.game_logic.get_game_date()
             winner_today = self.game_logic.get_daily_winner(game_date)
 
             if not winner_today:
-                logger.debug("No winner found for today, skipping role update")
+                logger.info("No winner found for today, skipping role update")
                 return
 
-            logger.debug(f"Today's winner: {winner_today['username']} (ID: {winner_today['user_id']})")
+            logger.info(f"Today's winner: {winner_today['username']} (ID: {winner_today['user_id']})")
 
             winner_14_days = self.game_logic.get_winner_stats(days=14)
             winner_365_days = self.game_logic.get_winner_stats(days=365)
@@ -188,9 +188,9 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
             top_365_day = winner_365_days[0] if winner_365_days else None
 
             if top_14_day:
-                logger.debug(f"Top 14-day player: {top_14_day['username']} ({top_14_day['wins']} wins)")
+                logger.info(f"Top 14-day player: {top_14_day['username']} ({top_14_day['wins']} wins)")
             if top_365_day:
-                logger.debug(f"Top 365-day player: {top_365_day['username']} ({top_365_day['wins']} wins)")
+                logger.info(f"Top 365-day player: {top_365_day['username']} ({top_365_day['wins']} wins)")
 
             for guild in self.bot.guilds:
                 try:
@@ -205,10 +205,10 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
 
     async def _update_guild_roles(self, guild, winner_today, top_14_day, top_365_day):
         """Update roles for a specific guild"""
-        logger.debug(f"Processing guild: {guild.name} (ID: {guild.id})")
+        logger.info(f"Processing guild: {guild.name} (ID: {guild.id})")
         member = guild.get_member(winner_today['user_id'])
         if not member:
-            logger.debug(f"Winner not found in guild {guild.name}")
+            logger.info(f"Winner not found in guild {guild.name}")
             return
 
         logger.debug(f"Found winner {member.display_name} in guild {guild.name}")
@@ -217,23 +217,23 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
         commander_role = guild.get_role(Config.COMMANDER_ROLE_ID) if Config.COMMANDER_ROLE_ID else None
         general_role = guild.get_role(Config.GENERAL_ROLE_ID) if Config.GENERAL_ROLE_ID else None
 
-        logger.debug(f"Roles found - Sergeant: {sergeant_role}, Commander: {commander_role}, General: {general_role}")
+        logger.info(f"Roles found - Sergeant: {sergeant_role}, Commander: {commander_role}, General: {general_role}")
 
         # Remove all roles first
         roles_to_remove = [r for r in [sergeant_role, commander_role, general_role] if r and r in member.roles]
         if roles_to_remove:
-            logger.debug(f"Removing roles from {member.display_name}: {[r.name for r in roles_to_remove]}")
+            logger.info(f"Removing roles from {member.display_name}: {[r.name for r in roles_to_remove]}")
             await member.remove_roles(*roles_to_remove)
 
         # Assign appropriate role
         if top_365_day and member.id == top_365_day['user_id'] and general_role:
-            logger.debug(f"Assigning General role to {member.display_name}")
+            logger.info(f"Assigning General role to {member.display_name}")
             await member.add_roles(general_role)
         elif top_14_day and member.id == top_14_day['user_id'] and commander_role:
-            logger.debug(f"Assigning Commander role to {member.display_name}")
+            logger.info(f"Assigning Commander role to {member.display_name}")
             await member.add_roles(commander_role)
         elif sergeant_role:
-            logger.debug(f"Assigning Sergeant role to {member.display_name}")
+            logger.info(f"Assigning Sergeant role to {member.display_name}")
             await member.add_roles(sergeant_role)
 
         # Update roles for other members who should have commander/general
