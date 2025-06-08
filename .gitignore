@@ -6,3 +6,41 @@ bin/
 bot.log
 lib/
 pyvenv.cfg
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/*.pyo
+**/*.pyd
+**/*.so
+**/*.egg-info/
+
+# Virtual environments
+/venv/
+/env/
+/test_env/
+/.venv/
+
+# Logs
+/logs/
+
+# Environment variables
+/.env
+
+# IDE
+/.vscode/
+/.idea/
+*.swp
+*.swo
+
+# Docker
+/.docker/
+/postgres_data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
