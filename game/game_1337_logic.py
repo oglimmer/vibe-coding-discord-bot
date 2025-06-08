@@ -106,12 +106,9 @@ class Game1337Logic:
                     hour, minute, second = int(hour), int(minute), int(second)
                     microsecond = int(ms) * 1000
 
-                    if hour == 13 and minute == 37 and 0 <= second <= 59:
-                        dt = datetime.combine(game_date, time(hour, minute, second, microsecond))
-                        logger.debug(f"Successfully parsed timestamp: {self.format_time_with_ms(dt)}")
-                        return dt
-                    else:
-                        logger.debug(f"Invalid time components: {hour}:{minute}:{second}")
+                    dt = datetime.combine(game_date, time(hour, minute, second, microsecond))
+                    logger.debug(f"Successfully parsed timestamp: {self.format_time_with_ms(dt)}")
+                    return dt
                 except ValueError as e:
                     logger.debug(f"ValueError parsing time components: {e}")
                     continue
