@@ -188,7 +188,7 @@ class Game1337Logic:
         # Check for catastrophic event (identical times)
         identical_times = [bet for bet in valid_bets if bet['play_time'] == winner['play_time']]
         if len(identical_times) > 1:
-            logger.warning(
+            logger.info(
                 f"Catastrophic event! {len(identical_times)} players with identical time: "
                 f"{self.format_time_with_ms(winner['play_time'])}"
             )
