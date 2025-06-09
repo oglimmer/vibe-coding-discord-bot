@@ -133,6 +133,16 @@ class Game1337Logic:
         
         return current_time > deadline
 
+    def is_win_time_passed(self, current_time: Optional[datetime] = None) -> bool:
+        """Check if the actual WIN_TIME has passed (precise to milliseconds)"""
+        if current_time is None:
+            current_time = datetime.now()
+        
+        game_date = current_time.date()
+        win_time = self.get_daily_win_time(game_date)
+        
+        return current_time > win_time
+
     def is_timestamp_in_future(self, timestamp: datetime, current_time: Optional[datetime] = None) -> bool:
         """Check if timestamp is in the future"""
         if current_time is None:
