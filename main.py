@@ -14,6 +14,7 @@ from commands.bet_1337_command import setup as setup_bet_1337_command
 from commands.bet_1337_early_bird_command import setup as setup_bet_1337_early_bird_command
 from commands.info_1337_command import setup as setup_info_1337_command
 from commands.stats_1337_command import setup as setup_stats_1337_command
+from commands.rules_1337_command import setup as setup_rules_1337_command
 
 logger = setup_logging()
 
@@ -44,6 +45,7 @@ class DiscordBot(commands.Bot):
             await setup_bet_1337_early_bird_command(self, self.db_manager)
             await setup_info_1337_command(self, self.db_manager)
             await setup_stats_1337_command(self, self.db_manager)
+            await setup_rules_1337_command(self, self.db_manager)
             
             await self.tree.sync()
             logger.info("Command tree synced successfully")
