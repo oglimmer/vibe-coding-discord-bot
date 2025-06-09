@@ -387,6 +387,256 @@ class TestGame1337Logic(unittest.TestCase):
         self.assertTrue(result.get('catastrophic_event'))
         self.assertEqual(result['identical_count'], 2)
 
+    def test_apply_winner_selection_rules_regular_closer(self):
+        """Test when regular bet is closer to win time"""
+        win_time = datetime(2023, 12, 25, 13, 37, 30, 500000)  # 30.5 seconds
+        
+        valid_bets = [
+            {
+                'user_id': 12345,
+                'username': 'RegularCloser',
+                'play_time': datetime(2023, 12, 25, 13, 37, 28, 100000),  # 2.4s before win
+                'bet_type': 'regular',
+                'server_id': 67890
+            },
+            {
+                'user_id': 12346,
+                'username': 'EarlyBirdFar',
+                'play_time': datetime(2023, 12, 25, 13, 37, 25, 0),  # 5.5s before win
+                'bet_type': 'early_bird',
+                'server_id': 67890
+            }
+        ]
+        
+        winner = self.logic._apply_winner_selection_rules(valid_bets, win_time)
+        
+        self.assertIsNotNone(winner)
+        self.assertEqual(winner['username'], 'RegularCloser')
+        self.assertEqual(winner['bet_type'], 'regular')
+
+    def test_apply_winner_selection_rules_early_bird_closer_no_penalty(self):
+        """Test when early_bird is closer and more than 3 seconds apart from regular"""
+        win_time = datetime(2023, 12, 25, 13, 37, 30, 0)  # 30.0 seconds
+        
+        valid_bets = [
+            {
+                'user_id': 12345,
+                'username': 'RegularFar',
+                'play_time': datetime(2023, 12, 25, 13, 37, 20, 0),  # 10s before win
+                'bet_type': 'regular',
+                'server_id': 67890
+            },
+            {
+                'user_id': 12346,
+                'username': 'EarlyBirdCloser',
+                'play_time': datetime(2023, 12, 25, 13, 37, 28, 0),  # 2s before win
+                'bet_type': 'early_bird',
+                'server_id': 67890
+            }
+        ]
+        
+        winner = self.logic._apply_winner_selection_rules(valid_bets, win_time)
+        
+        self.assertIsNotNone(winner)
+        self.assertEqual(winner['username'], 'EarlyBirdCloser')
+        self.assertEqual(winner['bet_type'], 'early_bird')
+
+    def test_apply_winner_selection_rules_early_bird_closer_with_penalty(self):
+        """Test when early_bird is closer but within 3 seconds of regular (penalty applies)"""
+        win_time = datetime(2023, 12, 25, 13, 37, 30, 0)  # 30.0 seconds
+        
+        valid_bets = [
+            {
+                'user_id': 12345,
+                'username': 'RegularNear',
+                'play_time': datetime(2023, 12, 25, 13, 37, 26, 0),  # 4s before win
+                'bet_type': 'regular',
+                'server_id': 67890
+            },
+            {
+                'user_id': 12346,
+                'username': 'EarlyBirdCloser',
+                'play_time': datetime(2023, 12, 25, 13, 37, 28, 0),  # 2s before win
+                'bet_type': 'early_bird',
+                'server_id': 67890
+            }
+        ]
+        
+        winner = self.logic._apply_winner_selection_rules(valid_bets, win_time)
+        
+        self.assertIsNotNone(winner)
+        self.assertEqual(winner['username'], 'RegularNear')
+        self.assertEqual(winner['bet_type'], 'regular')
+
+    def test_apply_winner_selection_rules_millisecond_precision(self):
+        """Test millisecond precision in winner selection"""
+        win_time = datetime(2023, 12, 25, 13, 37, 30, 500000)  # 30.5 seconds
+        
+        valid_bets = [
+            {
+                'user_id': 12345,
+                'username': 'RegularPrecise',
+                'play_time': datetime(2023, 12, 25, 13, 37, 30, 100000),  # 0.4s before win
+                'bet_type': 'regular',
+                'server_id': 67890
+            },
+            {
+                'user_id': 12346,
+                'username': 'EarlyBirdPrecise',
+                'play_time': datetime(2023, 12, 25, 13, 37, 30, 200000),  # 0.3s before win
+                'bet_type': 'early_bird',
+                'server_id': 67890
+            }
+        ]
+        
+        winner = self.logic._apply_winner_selection_rules(valid_bets, win_time)
+        
+        self.assertIsNotNone(winner)
+        self.assertEqual(winner['username'], 'RegularPrecise')
+        self.assertEqual(winner['bet_type'], 'regular')
+
+    def test_apply_winner_selection_rules_exact_3_seconds_penalty(self):
+        """Test edge case: exactly 3 seconds apart (penalty should apply)"""
+        win_time = datetime(2023, 12, 25, 13, 37, 30, 0)  # 30.0 seconds
+        
+        valid_bets = [
+            {
+                'user_id': 12345,
+                'username': 'RegularExact',
+                'play_time': datetime(2023, 12, 25, 13, 37, 25, 0),  # 5s before win
+                'bet_type': 'regular',
+                'server_id': 67890
+            },
+            {
+                'user_id': 12346,
+                'username': 'EarlyBirdExact',
+                'play_time': datetime(2023, 12, 25, 13, 37, 28, 0),  # 2s before win
+                'bet_type': 'early_bird',
+                'server_id': 67890
+            }
+        ]
+        
+        winner = self.logic._apply_winner_selection_rules(valid_bets, win_time)
+        
+        self.assertIsNotNone(winner)
+        self.assertEqual(winner['username'], 'RegularExact')
+        self.assertEqual(winner['bet_type'], 'regular')
+
+    def test_apply_winner_selection_rules_only_regular_bets(self):
+        """Test when only regular bets exist"""
+        win_time = datetime(2023, 12, 25, 13, 37, 30, 0)
+        
+        valid_bets = [
+            {
+                'user_id': 12345,
+                'username': 'Regular1',
+                'play_time': datetime(2023, 12, 25, 13, 37, 25, 0),
+                'bet_type': 'regular',
+                'server_id': 67890
+            },
+            {
+                'user_id': 12346,
+                'username': 'Regular2',
+                'play_time': datetime(2023, 12, 25, 13, 37, 28, 0),
+                'bet_type': 'regular',
+                'server_id': 67890
+            }
+        ]
+        
+        winner = self.logic._apply_winner_selection_rules(valid_bets, win_time)
+        
+        self.assertIsNotNone(winner)
+        self.assertEqual(winner['username'], 'Regular2')  # Closer to win time
+        self.assertEqual(winner['bet_type'], 'regular')
+
+    def test_apply_winner_selection_rules_only_early_bird_bets(self):
+        """Test when only early_bird bets exist"""
+        win_time = datetime(2023, 12, 25, 13, 37, 30, 0)
+        
+        valid_bets = [
+            {
+                'user_id': 12345,
+                'username': 'EarlyBird1',
+                'play_time': datetime(2023, 12, 25, 13, 37, 25, 0),
+                'bet_type': 'early_bird',
+                'server_id': 67890
+            },
+            {
+                'user_id': 12346,
+                'username': 'EarlyBird2',
+                'play_time': datetime(2023, 12, 25, 13, 37, 28, 0),
+                'bet_type': 'early_bird',
+                'server_id': 67890
+            }
+        ]
+        
+        winner = self.logic._apply_winner_selection_rules(valid_bets, win_time)
+        
+        self.assertIsNotNone(winner)
+        self.assertEqual(winner['username'], 'EarlyBird2')  # Closer to win time
+        self.assertEqual(winner['bet_type'], 'early_bird')
+
+    def test_apply_winner_selection_rules_no_valid_bets(self):
+        """Test when no valid bets exist"""
+        win_time = datetime(2023, 12, 25, 13, 37, 30, 0)
+        valid_bets = []
+        
+        winner = self.logic._apply_winner_selection_rules(valid_bets, win_time)
+        
+        self.assertIsNone(winner)
+
+    def test_apply_winner_selection_rules_tie_regular_wins(self):
+        """Test when regular and early_bird are equally close, regular wins"""
+        win_time = datetime(2023, 12, 25, 13, 37, 30, 0)
+        
+        valid_bets = [
+            {
+                'user_id': 12345,
+                'username': 'RegularTie',
+                'play_time': datetime(2023, 12, 25, 13, 37, 28, 0),  # 2s before win
+                'bet_type': 'regular',
+                'server_id': 67890
+            },
+            {
+                'user_id': 12346,
+                'username': 'EarlyBirdTie',
+                'play_time': datetime(2023, 12, 25, 13, 37, 28, 0),  # 2s before win
+                'bet_type': 'early_bird',
+                'server_id': 67890
+            }
+        ]
+        
+        winner = self.logic._apply_winner_selection_rules(valid_bets, win_time)
+        
+        self.assertIsNotNone(winner)
+        self.assertEqual(winner['username'], 'RegularTie')
+        self.assertEqual(winner['bet_type'], 'regular')
+
+    def test_get_milliseconds_since_midnight(self):
+        """Test the millisecond calculation method"""
+        dt = datetime(2023, 12, 25, 13, 37, 25, 123456)
+        ms = self.logic.get_milliseconds_since_midnight(dt)
+        
+        # 13:37:25.123456 = (13*3600 + 37*60 + 25)*1000 + 123 = 49,045,123ms
+        expected = (13 * 3600 + 37 * 60 + 25) * 1000 + 123
+        self.assertEqual(ms, expected)
+
+    def test_get_milliseconds_since_midnight_zero_time(self):
+        """Test millisecond calculation for midnight"""
+        dt = datetime(2023, 12, 25, 0, 0, 0, 0)
+        ms = self.logic.get_milliseconds_since_midnight(dt)
+        
+        self.assertEqual(ms, 0)
+
+    def test_get_milliseconds_since_midnight_end_of_day(self):
+        """Test millisecond calculation for end of day"""
+        dt = datetime(2023, 12, 25, 23, 59, 59, 999999)
+        ms = self.logic.get_milliseconds_since_midnight(dt)
+        
+        # 23:59:59.999999 = (23*3600 + 59*60 + 59)*1000 + 999 = 86,399,999ms
+        expected = (23 * 3600 + 59 * 60 + 59) * 1000 + 999
+        self.assertEqual(ms, expected)
+
 
 if __name__ == '__main__':
     unittest.main()

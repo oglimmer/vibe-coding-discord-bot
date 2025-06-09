@@ -207,38 +207,66 @@ class Game1337Logic:
         
         return winner_data
 
+    def get_milliseconds_since_midnight(self, dt: datetime) -> int:
+        """Get milliseconds since midnight for a datetime object"""
+        return (dt.hour * 3600 + dt.minute * 60 + dt.second) * 1000 + dt.microsecond // 1000
+
     def _apply_winner_selection_rules(self, valid_bets: List[Dict], win_time: datetime) -> Optional[Dict]:
         """
         Apply the winner selection rules:
-        1. Recent regular bets (within 3 seconds of win time)
-        2. All regular bets (latest wins)
-        3. Early bird bets (latest wins)
+        1. Find the closest regular bet and closest early_bird bet
+        2. If regular bet is closer, it wins
+        3. If early_bird bet is closer, it only wins if more than 3 seconds apart from closest regular bet
         """
+        if not valid_bets:
+            return None
+
+        # Separate bets by type
         regular_bets = [bet for bet in valid_bets if bet['bet_type'] == 'regular']
         early_bird_bets = [bet for bet in valid_bets if bet['bet_type'] == 'early_bird']
 
-        logger.debug(f"Regular bets: {len(regular_bets)}, Early bird bets: {len(early_bird_bets)}")
+        # Find closest bets to win_time
+        win_time_ms = self.get_milliseconds_since_midnight(win_time)
+        
+        closest_regular = None
+        if regular_bets:
+            closest_regular = min(regular_bets, key=lambda x: abs(win_time_ms - self.get_milliseconds_since_midnight(x['play_time'])))
+        
+        closest_early_bird = None
+        if early_bird_bets:
+            closest_early_bird = min(early_bird_bets, key=lambda x: abs(win_time_ms - self.get_milliseconds_since_midnight(x['play_time'])))
 
-        three_seconds_before = win_time - timedelta(seconds=3)
-        recent_regular_bets = [bet for bet in regular_bets if bet['play_time'] >= three_seconds_before]
-
-        logger.debug(f"Recent regular bets (within 3s of win): {len(recent_regular_bets)}")
-        logger.debug(f"Three seconds before win time: {self.format_time_with_ms(three_seconds_before)}")
-
-        if recent_regular_bets:
-            winner = max(regular_bets, key=lambda x: x['play_time'])
-            logger.debug(f"Winner from recent regular bets: {winner['username']}")
-            return winner
-        elif regular_bets:
-            winner = max(regular_bets, key=lambda x: x['play_time'])
-            logger.debug(f"Winner from all regular bets: {winner['username']}")
-            return winner
-        elif early_bird_bets:
-            winner = max(early_bird_bets, key=lambda x: x['play_time'])
-            logger.debug(f"Winner from early bird bets: {winner['username']}")
-            return winner
-        else:
+        # If no regular bets, early_bird wins (if exists)
+        if not closest_regular:
+            if closest_early_bird:
+                logger.debug(f"Winner: {closest_early_bird['username']} (early_bird bet, no regular bets)")
+                return closest_early_bird
             return None
+
+        # If no early_bird bets, regular wins
+        if not closest_early_bird:
+            logger.debug(f"Winner: {closest_regular['username']} (regular bet, no early_bird bets)")
+            return closest_regular
+
+        # Compare distances to win_time
+        regular_distance = abs(win_time_ms - self.get_milliseconds_since_midnight(closest_regular['play_time']))
+        early_bird_distance = abs(win_time_ms - self.get_milliseconds_since_midnight(closest_early_bird['play_time']))
+
+        # If regular bet is closer, it wins
+        if regular_distance <= early_bird_distance:
+            logger.debug(f"Winner: {closest_regular['username']} (regular bet closer to win time)")
+            return closest_regular
+
+        # Early_bird is closer, check if more than 3 seconds apart from closest regular
+        time_diff = abs(self.get_milliseconds_since_midnight(closest_early_bird['play_time']) - 
+                       self.get_milliseconds_since_midnight(closest_regular['play_time']))
+        
+        if time_diff > 3000:  # More than 3 seconds (3000ms)
+            logger.debug(f"Winner: {closest_early_bird['username']} (early_bird closer and >3s apart)")
+            return closest_early_bird
+        else:
+            logger.debug(f"Winner: {closest_regular['username']} (early_bird closer but within 3s of regular)")
+            return closest_regular
 
     def save_winner(self, winner_data: Dict[str, Any]) -> bool:
         """Save the winner to the database"""
