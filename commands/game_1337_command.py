@@ -243,35 +243,7 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
 
     def _determine_new_role_assignments(self, winner_today, top_14_day, top_365_day):
         """Determine who should get which roles based on game statistics"""
-        assignments = {}
-        
-        # Start with today's winner getting Sergeant
-        assignments['sergeant'] = winner_today['user_id']
-        
-        # Override with Commander if winner is top 14-day player
-        if top_14_day and winner_today['user_id'] == top_14_day['user_id']:
-            assignments['commander'] = winner_today['user_id']
-            if 'sergeant' in assignments and assignments['sergeant'] == winner_today['user_id']:
-                del assignments['sergeant']
-        
-        # Override with General if winner is top 365-day player
-        if top_365_day and winner_today['user_id'] == top_365_day['user_id']:
-            assignments['general'] = winner_today['user_id']
-            # Remove lower roles
-            if 'commander' in assignments and assignments['commander'] == winner_today['user_id']:
-                del assignments['commander']
-            if 'sergeant' in assignments and assignments['sergeant'] == winner_today['user_id']:
-                del assignments['sergeant']
-        
-        # Assign special roles to non-winners
-        if top_365_day and top_365_day['user_id'] != winner_today['user_id']:
-            assignments['general'] = top_365_day['user_id']
-        
-        if (top_14_day and top_14_day['user_id'] != winner_today['user_id'] and 
-            top_14_day['user_id'] != (top_365_day['user_id'] if top_365_day else None)):
-            assignments['commander'] = top_14_day['user_id']
-        
-        return assignments
+        return self.game_logic.determine_new_role_assignments(winner_today, top_14_day, top_365_day)
 
     async def _apply_new_role_assignments(self, guild, assignments, sergeant_role, commander_role, general_role):
         """Apply new role assignments to Discord members and update database"""
@@ -304,17 +276,6 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
             if not success:
                 logger.error(f"Failed to update database for {role_type} assignment to {member.display_name}")
 
-    async def _announce_general_bet(self, user, play_time):
-        """Announce when a General places a bet"""
-        message = f"🎖️ **The General has placed their bet at {self.game_logic.format_time_with_ms(play_time)}!** 🎖️"
-
-        for guild in self.bot.guilds:
-            if guild.get_member(user.id):
-                for channel in guild.text_channels:
-                    if channel.permissions_for(guild.me).send_messages:
-                        await channel.send(message)
-                        break
-
     async def _announce_winner(self, winner_data):
         """Announce the daily winner to configured channels"""
         try:
@@ -326,11 +287,7 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
             top_365_day = winner_365_days[0] if winner_365_days else None
             
             # Determine winner's new role
-            winner_role = "🏅 Sergeant"
-            if top_365_day and winner_data['user_id'] == top_365_day['user_id']:
-                winner_role = "🎖️ General"
-            elif top_14_day and winner_data['user_id'] == top_14_day['user_id']:
-                winner_role = "🔥 Commander"
+            winner_role = self.game_logic.get_winner_role_name(winner_data)
             
             # Create winner announcement embed
             embed = self._create_winner_embed(winner_data, winner_role, top_14_day, top_365_day)
@@ -343,70 +300,22 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
 
     def _create_winner_embed(self, winner_data, winner_role, top_14_day, top_365_day):
         """Create the winner announcement embed"""
+        embed_data = self.game_logic.create_winner_embed_data(winner_data, winner_role, top_14_day, top_365_day)
+        
         embed = discord.Embed(
-            title="🏆 Daily 1337 Winner Announced!",
-            color=0x00FF00,
+            title=embed_data['title'],
+            color=embed_data['color'],
             timestamp=datetime.now()
         )
         
-        # Winner info
-        embed.add_field(
-            name="🎯 Winner",
-            value=f"**{winner_data['username']}**",
-            inline=True
-        )
-        
-        # Timing info
-        embed.add_field(
-            name="⏰ Bet Time", 
-            value=f"`{self.game_logic.format_time_with_ms(winner_data['play_time'])}`",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="🎲 Win Time",
-            value=f"`{self.game_logic.format_time_with_ms(winner_data['win_time'])}`", 
-            inline=True
-        )
-        
-        # Performance info
-        bet_type_emoji = "🐦 Early Bird" if winner_data['bet_type'] == 'early_bird' else "⚡ Regular"
-        embed.add_field(
-            name="📊 Performance",
-            value=f"{bet_type_emoji}\n**{winner_data['millisecond_diff']}ms** before win time",
-            inline=True
-        )
-        
-        # Role info
-        embed.add_field(
-            name="🏅 New Role",
-            value=winner_role,
-            inline=True
-        )
-        
-        # Total wins
-        user_total_wins = self.game_logic.get_winner_stats(user_id=winner_data['user_id'])
-        embed.add_field(
-            name="🏆 Total Wins",
-            value=f"**{user_total_wins}** wins",
-            inline=True
-        )
-        
-        # Add role hierarchy info if there are role changes
-        role_updates = []
-        if top_365_day:
-            role_updates.append(f"🎖️ **General:** {top_365_day['username']} ({top_365_day['wins']} wins)")
-        if top_14_day and (not top_365_day or top_14_day['user_id'] != top_365_day['user_id']):
-            role_updates.append(f"🔥 **Commander:** {top_14_day['username']} ({top_14_day['wins']} wins)")
-        
-        if role_updates:
+        for field in embed_data['fields']:
             embed.add_field(
-                name="👑 Current Leaders",
-                value="\n".join(role_updates),
-                inline=False
+                name=field['name'],
+                value=field['value'],
+                inline=field['inline']
             )
         
-        embed.set_footer(text="🎮 Join tomorrow's battle at 13:37! Use /1337 or /1337-early-bird")
+        embed.set_footer(text=embed_data['footer_text'])
         
         return embed
 
@@ -439,321 +348,8 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
         if not message_sent:
             logger.warning("Could not send winner announcement to any channel")
 
-    @discord.app_commands.command(name="1337", description="Place a regular bet for today's 1337 game")
-    async def bet_1337(self, interaction: discord.Interaction):
-        """Handle regular bet placement"""
-        try:
-            logger.debug(f"User {interaction.user.display_name} (ID: {interaction.user.id}) attempting regular bet")
-            
-            # Validate bet placement
-            validation = self.game_logic.validate_bet_placement(interaction.user.id)
-            if not validation['valid']:
-                await interaction.response.send_message(validation['message'], ephemeral=True)
-                return
-
-            # Place the bet
-            play_time = datetime.now()
-            logger.debug(f"Current time: {self.game_logic.format_time_with_ms(play_time)}")
-
-            success = self.game_logic.save_bet(
-                interaction.user.id,
-                interaction.user.display_name,
-                play_time,
-                'regular',
-                interaction.guild_id,
-                interaction.channel_id
-            )
-
-            if success:
-                logger.info(f"Regular bet saved successfully for {interaction.user.display_name} at {self.game_logic.format_time_with_ms(play_time)}")
-
-                # Check if user is General and announce
-                if Config.GENERAL_ROLE_ID:
-                    general_role = interaction.guild.get_role(Config.GENERAL_ROLE_ID)
-                    if general_role and general_role in interaction.user.roles:
-                        logger.debug(f"User is General, announcing bet")
-                        await self._announce_general_bet(interaction.user, play_time)
-
-                await interaction.response.send_message(
-                    f"✅ **Bet placed!** Your time: {self.game_logic.format_time_with_ms(play_time)}\nGood luck! 🍀",
-                    ephemeral=True
-                )
-            else:
-                logger.error(f"Failed to save regular bet for {interaction.user.display_name}")
-                await interaction.response.send_message(
-                    "❌ **Error placing bet.** Please try again later.",
-                    ephemeral=True
-                )
-
-        except Exception as e:
-            logger.error(f"Error in 1337 command: {e}")
-            await interaction.response.send_message(
-                "❌ **Something went wrong.** Please try again later.",
-                ephemeral=True
-            )
-
-    @discord.app_commands.command(name="1337-early-bird", description="Place an early bird bet with a specific timestamp")
-    async def bet_1337_early_bird(self, interaction: discord.Interaction, timestamp: str):
-        """Handle early bird bet placement"""
-        try:
-            logger.debug(f"User {interaction.user.display_name} (ID: {interaction.user.id}) attempting early bird bet with timestamp: '{timestamp}'")
-            
-            # Validate bet placement
-            bet_validation = self.game_logic.validate_bet_placement(interaction.user.id)
-            if not bet_validation['valid']:
-                await interaction.response.send_message(bet_validation['message'], ephemeral=True)
-                return
-
-            # Validate timestamp
-            timestamp_validation = self.game_logic.validate_early_bird_timestamp(timestamp)
-            if not timestamp_validation['valid']:
-                await interaction.response.send_message(timestamp_validation['message'], ephemeral=True)
-                return
-
-            play_time = timestamp_validation['timestamp']
-            
-            # Save the bet
-            success = self.game_logic.save_bet(
-                interaction.user.id,
-                interaction.user.display_name,
-                play_time,
-                'early_bird',
-                interaction.guild_id,
-                interaction.channel_id
-            )
-
-            if success:
-                # Check if user is General and announce
-                if Config.GENERAL_ROLE_ID:
-                    general_role = interaction.guild.get_role(Config.GENERAL_ROLE_ID)
-                    if general_role and general_role in interaction.user.roles:
-                        await self._announce_general_bet(interaction.user, play_time)
-
-                await interaction.response.send_message(
-                    f"✅ **Early bird bet scheduled!** Your time: {self.game_logic.format_time_with_ms(play_time)}\nGood luck! 🍀",
-                    ephemeral=True
-                )
-            else:
-                await interaction.response.send_message(
-                    "❌ **Error placing bet.** Please try again later.",
-                    ephemeral=True
-                )
-
-        except Exception as e:
-            logger.error(f"Error in 1337-early-bird command: {e}")
-            await interaction.response.send_message(
-                "❌ **Something went wrong.** Please try again later.",
-                ephemeral=True
-            )
-
-    @discord.app_commands.command(name="1337-info", description="Show your current bet information for today")
-    async def info_1337(self, interaction: discord.Interaction):
-        """Show user's bet information"""
-        try:
-            user_bet = self.game_logic.get_user_bet_info(interaction.user.id)
-
-            if not user_bet:
-                await interaction.response.send_message(
-                    "❌ **No bet placed today!** Use `/1337` or `/1337-early-bird` to place a bet.",
-                    ephemeral=True
-                )
-                return
-
-            embed = self._create_user_info_embed(user_bet)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-
-        except Exception as e:
-            logger.error(f"Error in 1337-info command: {e}")
-            await interaction.response.send_message(
-                "❌ **Something went wrong.** Please try again later.",
-                ephemeral=True
-            )
-
-    def _create_user_info_embed(self, user_bet):
-        """Create user bet info embed"""
-        game_date = self.game_logic.get_game_date()
-        game_passed = self.game_logic.is_game_time_passed()
-
-        embed = discord.Embed(
-            title="🎯 Your 1337 Bet Info",
-            color=0x1337FF,
-            timestamp=datetime.now()
-        )
-
-        bet_type_emoji = "🐦" if user_bet['bet_type'] == 'early_bird' else "⚡"
-        embed.add_field(
-            name="Bet Type",
-            value=f"{bet_type_emoji} {user_bet['bet_type'].replace('_', ' ').title()}",
-            inline=True
-        )
-
-        embed.add_field(
-            name="Your Time",
-            value=f"`{self.game_logic.format_time_with_ms(user_bet['play_time'])}`",
-            inline=True
-        )
-
-        if game_passed:
-            winner = self.game_logic.get_daily_winner(game_date)
-            if winner:
-                embed.add_field(
-                    name="Win Time",
-                    value=f"`{self.game_logic.format_time_with_ms(winner['win_time'])}`",
-                    inline=True
-                )
-
-                millisecond_diff = self.game_logic.calculate_millisecond_difference(
-                    user_bet['play_time'], winner['win_time']
-                )
-                embed.add_field(
-                    name="Difference",
-                    value=f"`{millisecond_diff}ms`",
-                    inline=True
-                )
-
-                if winner['user_id'] == user_bet['user_id']:
-                    embed.add_field(
-                        name="Result",
-                        value="🏆 **WINNER!**",
-                        inline=True
-                    )
-                    embed.color = 0x00FF00
-                else:
-                    embed.add_field(
-                        name="Result",
-                        value="💔 Better luck tomorrow!",
-                        inline=True
-                    )
-                    embed.color = 0xFF6B6B
-            else:
-                embed.add_field(
-                    name="Status",
-                    value="⏳ Waiting for results...",
-                    inline=False
-                )
-        else:
-            embed.add_field(
-                name="Status",
-                value="⏳ Waiting for 13:37...",
-                inline=False
-            )
-
-        return embed
-
-    @discord.app_commands.command(name="1337-stats", description="Show 1337 game statistics")
-    async def stats_1337(self, interaction: discord.Interaction):
-        """Show game statistics"""
-        try:
-            view = StatsView(self.game_logic)
-            embed = await view.get_page_embed(0)
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-        except Exception as e:
-            logger.error(f"Error in 1337-stats command: {e}")
-            await interaction.response.send_message(
-                "❌ **Something went wrong.** Please try again later.",
-                ephemeral=True
-            )
 
 
-class StatsView(discord.ui.View):
-    """Discord UI for statistics display"""
-    
-    def __init__(self, game_logic: Game1337Logic):
-        super().__init__(timeout=300)
-        self.game_logic = game_logic
-        self.current_page = 0
-        self.pages = ["365 Days", "14 Days", "Daily Bets"]
-
-    async def get_page_embed(self, page: int):
-        """Get embed for specific page"""
-        embed = discord.Embed(
-            title="📊 1337 Game Statistics",
-            color=0x1337FF,
-            timestamp=datetime.now()
-        )
-
-        if page == 0:  # 365 Days
-            stats = self.game_logic.get_winner_stats(days=365)
-            embed.add_field(
-                name="🏆 Top Players (Last 365 Days)",
-                value=self._format_stats_list(stats) if stats else "No winners yet",
-                inline=False
-            )
-
-        elif page == 1:  # 14 Days
-            stats = self.game_logic.get_winner_stats(days=14)
-            embed.add_field(
-                name="🔥 Top Players (Last 14 Days)",
-                value=self._format_stats_list(stats) if stats else "No winners yet",
-                inline=False
-            )
-
-        elif page == 2:  # Daily Bets
-            game_passed = self.game_logic.is_game_time_passed()
-            
-            if game_passed:
-                # Show today's bets
-                today_bets = self.game_logic.get_daily_bets()
-                embed.add_field(
-                    name="📅 Today's Players",
-                    value=self._format_daily_bets(today_bets) if today_bets else "No bets today",
-                    inline=False
-                )
-            else:
-                # Show yesterday's bets
-                yesterday_date = self.game_logic.get_yesterday_date()
-                yesterday_bets = self.game_logic.get_daily_bets(yesterday_date)
-                embed.add_field(
-                    name="📅 Yesterday's Players",
-                    value=self._format_daily_bets(yesterday_bets) if yesterday_bets else "No bets yesterday",
-                    inline=False
-                )
-
-        embed.set_footer(text=f"Page {page + 1}/3 • {self.pages[page]}")
-        return embed
-
-    def _format_stats_list(self, stats):
-        """Format statistics list for display"""
-        if not stats:
-            return "No data available"
-
-        lines = []
-        for i, stat in enumerate(stats[:10]):
-            rank = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
-            rank_emoji = rank[i] if i < len(rank) else "🏅"
-            lines.append(f"{rank_emoji} **{stat['username']}** - {stat['wins']} wins")
-
-        return "\n".join(lines)
-
-    def _format_daily_bets(self, bets):
-        """Format daily bets for display"""
-        if not bets:
-            return "No bets placed"
-
-        lines = []
-        for bet in bets[:15]:
-            bet_type_emoji = "🐦" if bet['bet_type'] == 'early_bird' else "⚡"
-            time_str = self.game_logic.format_time_with_ms(bet['play_time'])
-            lines.append(f"{bet_type_emoji} `{time_str}` **{bet['username']}**")
-
-        if len(bets) > 15:
-            lines.append(f"*+{len(bets) - 15} more players...*")
-
-        return "\n".join(lines)
-
-    @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.gray)
-    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Handle previous page button"""
-        self.current_page = (self.current_page - 1) % len(self.pages)
-        embed = await self.get_page_embed(self.current_page)
-        await interaction.response.edit_message(embed=embed, view=self)
-
-    @discord.ui.button(label="▶️ Next", style=discord.ButtonStyle.gray)
-    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Handle next page button"""
-        self.current_page = (self.current_page + 1) % len(self.pages)
-        embed = await self.get_page_embed(self.current_page)
-        await interaction.response.edit_message(embed=embed, view=self)
 
 
 async def setup(bot, db_manager):

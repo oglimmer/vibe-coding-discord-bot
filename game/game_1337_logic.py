@@ -338,3 +338,273 @@ class Game1337Logic:
         if game_date is None:
             game_date = self.get_game_date()
         return self.db_manager.get_daily_bets(game_date)
+
+    def determine_new_role_assignments(self, winner_today: Dict[str, Any], 
+                                      top_14_day: Optional[Dict[str, Any]], 
+                                      top_365_day: Optional[Dict[str, Any]]) -> Dict[str, int]:
+        """Determine who should get which roles based on game statistics"""
+        assignments = {}
+        
+        # Start with today's winner getting Sergeant
+        assignments['sergeant'] = winner_today['user_id']
+        
+        # Override with Commander if winner is top 14-day player
+        if top_14_day and winner_today['user_id'] == top_14_day['user_id']:
+            assignments['commander'] = winner_today['user_id']
+            if 'sergeant' in assignments and assignments['sergeant'] == winner_today['user_id']:
+                del assignments['sergeant']
+        
+        # Override with General if winner is top 365-day player
+        if top_365_day and winner_today['user_id'] == top_365_day['user_id']:
+            assignments['general'] = winner_today['user_id']
+            # Remove lower roles
+            if 'commander' in assignments and assignments['commander'] == winner_today['user_id']:
+                del assignments['commander']
+            if 'sergeant' in assignments and assignments['sergeant'] == winner_today['user_id']:
+                del assignments['sergeant']
+        
+        # Assign special roles to non-winners
+        if top_365_day and top_365_day['user_id'] != winner_today['user_id']:
+            assignments['general'] = top_365_day['user_id']
+        
+        if (top_14_day and top_14_day['user_id'] != winner_today['user_id'] and 
+            top_14_day['user_id'] != (top_365_day['user_id'] if top_365_day else None)):
+            assignments['commander'] = top_14_day['user_id']
+        
+        return assignments
+
+    def create_user_info_embed_data(self, user_bet: Dict[str, Any]) -> Dict[str, Any]:
+        """Create data for user bet info embed (Discord-independent)"""
+        game_date = self.get_game_date()
+        game_passed = self.is_game_time_passed()
+
+        embed_data = {
+            'title': '🎯 Your 1337 Bet Info',
+            'color': 0x1337FF,
+            'fields': []
+        }
+
+        bet_type_emoji = "🐦" if user_bet['bet_type'] == 'early_bird' else "⚡"
+        embed_data['fields'].append({
+            'name': 'Bet Type',
+            'value': f"{bet_type_emoji} {user_bet['bet_type'].replace('_', ' ').title()}",
+            'inline': True
+        })
+
+        embed_data['fields'].append({
+            'name': 'Your Time',
+            'value': f"`{self.format_time_with_ms(user_bet['play_time'])}`",
+            'inline': True
+        })
+
+        if game_passed:
+            winner = self.get_daily_winner(game_date)
+            if winner:
+                embed_data['fields'].append({
+                    'name': 'Win Time',
+                    'value': f"`{self.format_time_with_ms(winner['win_time'])}`",
+                    'inline': True
+                })
+
+                millisecond_diff = self.calculate_millisecond_difference(
+                    user_bet['play_time'], winner['win_time']
+                )
+                embed_data['fields'].append({
+                    'name': 'Difference',
+                    'value': f"`{millisecond_diff}ms`",
+                    'inline': True
+                })
+
+                if winner['user_id'] == user_bet['user_id']:
+                    embed_data['fields'].append({
+                        'name': 'Result',
+                        'value': '🏆 **WINNER!**',
+                        'inline': True
+                    })
+                    embed_data['color'] = 0x00FF00
+                else:
+                    embed_data['fields'].append({
+                        'name': 'Result',
+                        'value': '💔 Better luck tomorrow!',
+                        'inline': True
+                    })
+                    embed_data['color'] = 0xFF6B6B
+            else:
+                embed_data['fields'].append({
+                    'name': 'Status',
+                    'value': '⏳ Waiting for results...',
+                    'inline': False
+                })
+        else:
+            embed_data['fields'].append({
+                'name': 'Status',
+                'value': '⏳ Waiting for 13:37...',
+                'inline': False
+            })
+
+        return embed_data
+
+    def create_winner_embed_data(self, winner_data: Dict[str, Any], winner_role: str, 
+                                top_14_day: Optional[Dict[str, Any]], 
+                                top_365_day: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Create data for winner announcement embed (Discord-independent)"""
+        embed_data = {
+            'title': '🏆 Daily 1337 Winner Announced!',
+            'color': 0x00FF00,
+            'fields': []
+        }
+        
+        # Winner info
+        embed_data['fields'].append({
+            'name': '🎯 Winner',
+            'value': f"**{winner_data['username']}**",
+            'inline': True
+        })
+        
+        # Timing info
+        embed_data['fields'].append({
+            'name': '⏰ Bet Time',
+            'value': f"`{self.format_time_with_ms(winner_data['play_time'])}`",
+            'inline': True
+        })
+        
+        embed_data['fields'].append({
+            'name': '🎲 Win Time',
+            'value': f"`{self.format_time_with_ms(winner_data['win_time'])}`",
+            'inline': True
+        })
+        
+        # Performance info
+        bet_type_emoji = "🐦 Early Bird" if winner_data['bet_type'] == 'early_bird' else "⚡ Regular"
+        embed_data['fields'].append({
+            'name': '📊 Performance',
+            'value': f"{bet_type_emoji}\n**{winner_data['millisecond_diff']}ms** before win time",
+            'inline': True
+        })
+        
+        # Role info
+        embed_data['fields'].append({
+            'name': '🏅 New Role',
+            'value': winner_role,
+            'inline': True
+        })
+        
+        # Total wins
+        user_total_wins = self.get_winner_stats(user_id=winner_data['user_id'])
+        embed_data['fields'].append({
+            'name': '🏆 Total Wins',
+            'value': f"**{user_total_wins}** wins",
+            'inline': True
+        })
+        
+        # Add role hierarchy info if there are role changes
+        role_updates = []
+        if top_365_day:
+            role_updates.append(f"🎖️ **General:** {top_365_day['username']} ({top_365_day['wins']} wins)")
+        if top_14_day and (not top_365_day or top_14_day['user_id'] != top_365_day['user_id']):
+            role_updates.append(f"🔥 **Commander:** {top_14_day['username']} ({top_14_day['wins']} wins)")
+        
+        if role_updates:
+            embed_data['fields'].append({
+                'name': '👑 Current Leaders',
+                'value': "\n".join(role_updates),
+                'inline': False
+            })
+        
+        embed_data['footer_text'] = '🎮 Join tomorrow\'s battle at 13:37! Use /1337 or /1337-early-bird'
+        
+        return embed_data
+
+    def get_stats_page_data(self, page: int) -> Dict[str, Any]:
+        """Get statistics page data (Discord-independent)"""
+        pages = ["365 Days", "14 Days", "Daily Bets"]
+        
+        embed_data = {
+            'title': '📊 1337 Game Statistics',
+            'color': 0x1337FF,
+            'fields': []
+        }
+
+        if page == 0:  # 365 Days
+            stats = self.get_winner_stats(days=365)
+            embed_data['fields'].append({
+                'name': '🏆 Top Players (Last 365 Days)',
+                'value': self._format_stats_list(stats) if stats else 'No winners yet',
+                'inline': False
+            })
+
+        elif page == 1:  # 14 Days
+            stats = self.get_winner_stats(days=14)
+            embed_data['fields'].append({
+                'name': '🔥 Top Players (Last 14 Days)',
+                'value': self._format_stats_list(stats) if stats else 'No winners yet',
+                'inline': False
+            })
+
+        elif page == 2:  # Daily Bets
+            game_passed = self.is_game_time_passed()
+            
+            if game_passed:
+                # Show today's bets
+                today_bets = self.get_daily_bets()
+                embed_data['fields'].append({
+                    'name': '📅 Today\'s Players',
+                    'value': self._format_daily_bets(today_bets) if today_bets else 'No bets today',
+                    'inline': False
+                })
+            else:
+                # Show yesterday's bets
+                yesterday_date = self.get_yesterday_date()
+                yesterday_bets = self.get_daily_bets(yesterday_date)
+                embed_data['fields'].append({
+                    'name': '📅 Yesterday\'s Players',
+                    'value': self._format_daily_bets(yesterday_bets) if yesterday_bets else 'No bets yesterday',
+                    'inline': False
+                })
+
+        embed_data['footer_text'] = f"Page {page + 1}/3 • {pages[page]}"
+        return embed_data
+
+    def _format_stats_list(self, stats: List[Dict[str, Any]]) -> str:
+        """Format statistics list for display"""
+        if not stats:
+            return "No data available"
+
+        lines = []
+        for i, stat in enumerate(stats[:10]):
+            rank = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
+            rank_emoji = rank[i] if i < len(rank) else "🏅"
+            lines.append(f"{rank_emoji} **{stat['username']}** - {stat['wins']} wins")
+
+        return "\n".join(lines)
+
+    def _format_daily_bets(self, bets: List[Dict[str, Any]]) -> str:
+        """Format daily bets for display"""
+        if not bets:
+            return "No bets placed"
+
+        lines = []
+        for bet in bets[:15]:
+            bet_type_emoji = "🐦" if bet['bet_type'] == 'early_bird' else "⚡"
+            time_str = self.format_time_with_ms(bet['play_time'])
+            lines.append(f"{bet_type_emoji} `{time_str}` **{bet['username']}**")
+
+        if len(bets) > 15:
+            lines.append(f"*+{len(bets) - 15} more players...*")
+
+        return "\n".join(lines)
+
+    def get_winner_role_name(self, winner_data: Dict[str, Any]) -> str:
+        """Determine winner's new role name based on their position"""
+        winner_14_days = self.get_winner_stats(days=14)
+        winner_365_days = self.get_winner_stats(days=365)
+        
+        top_14_day = winner_14_days[0] if winner_14_days else None
+        top_365_day = winner_365_days[0] if winner_365_days else None
+        
+        if top_365_day and winner_data['user_id'] == top_365_day['user_id']:
+            return "🎖️ General"
+        elif top_14_day and winner_data['user_id'] == top_14_day['user_id']:
+            return "🔥 Commander"
+        else:
+            return "🏅 Sergeant"
