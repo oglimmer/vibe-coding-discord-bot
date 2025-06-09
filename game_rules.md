@@ -51,8 +51,13 @@ Early bird bets accept multiple timestamp formats:
 - **Rule**: Early bird bets can only win if they are more than 3 seconds apart from the closest regular bet
 - **Example**: 
   - Early bird at 13:37:25, Regular at 13:37:28, Win time at 13:37:30
-  - Early bird is closer (2s vs 5s), but only 3s apart from regular
-  - **Result**: Regular bet wins (penalty applies)
+  - Regular is closer (2s vs 5s from win time)
+  - **Result**: Regular bet wins (closer to win time)
+
+- **Example with Penalty**: 
+  - Early bird at 13:37:28, Regular at 13:37:25, Win time at 13:37:30
+  - Early bird is closer (2s vs 5s from win time), but only 3s apart from regular
+  - **Result**: Regular bet wins (early bird closer but within 3s of regular)
 
 ### Winner Criteria
 - **Primary**: Closest time to win time (before or equal to)

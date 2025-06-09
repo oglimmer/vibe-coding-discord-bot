@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 class GreetingRecord:
     username: str
     greeting_time: datetime
+    reaction_count: int = 0
 
 class DatabaseManager:
     def __init__(self):
@@ -49,6 +50,36 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     INDEX idx_user_date (user_id, greeting_date),
                     INDEX idx_date (greeting_date)
+                )
+            """)
+            
+            # Migration: Add message_id column if it doesn't exist
+            try:
+                cursor.execute("ALTER TABLE greetings ADD COLUMN message_id BIGINT")
+                cursor.execute("ALTER TABLE greetings ADD INDEX idx_message_id (message_id)")
+                logger.info("Added message_id column to greetings table")
+            except mariadb.Error as e:
+                if "Duplicate column name" in str(e):
+                    logger.info("message_id column already exists in greetings table")
+                else:
+                    logger.warning(f"Could not add message_id column: {e}")
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS greeting_reactions (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    greeting_id INT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    username VARCHAR(255) NOT NULL,
+                    reaction_emoji VARCHAR(50) NOT NULL,
+                    reaction_date DATE NOT NULL,
+                    reaction_time TIME NOT NULL,
+                    server_id BIGINT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (greeting_id) REFERENCES greetings(id) ON DELETE CASCADE,
+                    UNIQUE KEY unique_reaction (greeting_id, user_id, reaction_emoji),
+                    INDEX idx_greeting_id (greeting_id),
+                    INDEX idx_user_id (user_id),
+                    INDEX idx_reaction_date (reaction_date)
                 )
             """)
             
@@ -112,7 +143,7 @@ class DatabaseManager:
     def get_todays_greetings(self, guild_id: Optional[int] = None) -> List[GreetingRecord]:
         """
         Fetch all greetings for the given guild from the start of today until now,
-        ordered by greeting_time ascending.
+        ordered by greeting_time ascending, with reaction counts.
         """
         try:
             cursor = self.connection.cursor()
@@ -120,29 +151,33 @@ class DatabaseManager:
             
             if guild_id:
                 cursor.execute("""
-                    SELECT username, greeting_time
-                    FROM greetings
-                    WHERE server_id = ? AND greeting_date = ?
-                    ORDER BY greeting_time ASC
+                    SELECT g.username, g.greeting_time, COUNT(gr.id) as reaction_count
+                    FROM greetings g
+                    LEFT JOIN greeting_reactions gr ON g.id = gr.greeting_id AND gr.reaction_date = g.greeting_date
+                    WHERE g.server_id = ? AND g.greeting_date = ?
+                    GROUP BY g.id, g.username, g.greeting_time
+                    ORDER BY g.greeting_time ASC
                 """, (guild_id, today))
             else:
                 cursor.execute("""
-                    SELECT username, greeting_time
-                    FROM greetings
-                    WHERE greeting_date = ?
-                    ORDER BY greeting_time ASC
+                    SELECT g.username, g.greeting_time, COUNT(gr.id) as reaction_count
+                    FROM greetings g
+                    LEFT JOIN greeting_reactions gr ON g.id = gr.greeting_id AND gr.reaction_date = g.greeting_date
+                    WHERE g.greeting_date = ?
+                    GROUP BY g.id, g.username, g.greeting_time
+                    ORDER BY g.greeting_time ASC
                 """, (today,))
             
             results = cursor.fetchall()
             return [
-                GreetingRecord(username=row[0], greeting_time=row[1])
+                GreetingRecord(username=row[0], greeting_time=row[1], reaction_count=row[2])
                 for row in results
             ]
         except mariadb.Error as e:
             logger.error(f"Error fetching today's greetings: {e}")
             return []
 
-    def save_greeting(self, user_id, username, greeting_message, server_id=None, channel_id=None):
+    def save_greeting(self, user_id, username, greeting_message, server_id=None, channel_id=None, message_id=None):
         try:
             cursor = self.connection.cursor()
             now = datetime.now()
@@ -150,16 +185,75 @@ class DatabaseManager:
             time = now.time()
             
             cursor.execute("""
-                INSERT INTO greetings (user_id, username, greeting_message, greeting_date, greeting_time, server_id, channel_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (user_id, username, greeting_message, date, time, server_id, channel_id))
+                INSERT INTO greetings (user_id, username, greeting_message, greeting_date, greeting_time, server_id, channel_id, message_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, username, greeting_message, date, time, server_id, channel_id, message_id))
             
+            greeting_id = cursor.lastrowid
             self.connection.commit()
-            logger.info(f"Saved greeting for user {username} ({user_id})")
-            return True
+            logger.info(f"Saved greeting for user {username} ({user_id}) with ID {greeting_id}")
+            return greeting_id
         except mariadb.Error as e:
             logger.error(f"Error saving greeting: {e}")
+            return None
+
+    def save_greeting_reaction(self, greeting_id, user_id, username, reaction_emoji, server_id=None):
+        try:
+            cursor = self.connection.cursor()
+            now = datetime.now()
+            date = now.date()
+            time = now.time()
+            
+            cursor.execute("""
+                INSERT INTO greeting_reactions (greeting_id, user_id, username, reaction_emoji, reaction_date, reaction_time, server_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                reaction_time = VALUES(reaction_time)
+            """, (greeting_id, user_id, username, reaction_emoji, date, time, server_id))
+            
+            self.connection.commit()
+            logger.info(f"Saved reaction {reaction_emoji} from {username} ({user_id}) to greeting {greeting_id}")
+            return True
+        except mariadb.Error as e:
+            logger.error(f"Error saving greeting reaction: {e}")
             return False
+
+    def remove_greeting_reaction(self, greeting_id, user_id, reaction_emoji):
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                DELETE FROM greeting_reactions 
+                WHERE greeting_id = ? AND user_id = ? AND reaction_emoji = ?
+            """, (greeting_id, user_id, reaction_emoji))
+            
+            self.connection.commit()
+            logger.info(f"Removed reaction {reaction_emoji} from user {user_id} to greeting {greeting_id}")
+            return True
+        except mariadb.Error as e:
+            logger.error(f"Error removing greeting reaction: {e}")
+            return False
+
+    def get_greeting_id_by_message(self, message_id, server_id=None):
+        try:
+            cursor = self.connection.cursor()
+            if server_id:
+                cursor.execute("""
+                    SELECT id FROM greetings 
+                    WHERE message_id = ? AND server_id = ?
+                    ORDER BY created_at DESC LIMIT 1
+                """, (message_id, server_id))
+            else:
+                cursor.execute("""
+                    SELECT id FROM greetings 
+                    WHERE message_id = ?
+                    ORDER BY created_at DESC LIMIT 1
+                """, (message_id,))
+            
+            result = cursor.fetchone()
+            return result[0] if result else None
+        except mariadb.Error as e:
+            logger.error(f"Error getting greeting ID: {e}")
+            return None
     
     def save_1337_bet(self, user_id, username, play_time, game_date, bet_type='regular', server_id=None, channel_id=None):
         try:

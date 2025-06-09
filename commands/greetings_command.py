@@ -41,25 +41,35 @@ class GreetingsCommand(commands.Cog):
                 embed.description = "No one has greeted today yet! Be the first to say good morning! 🌅"
                 embed.color = discord.Color.orange()
             else:
-                user_counts = {}
+                # Group by user and sum reaction counts
+                user_reactions = {}
                 latest_times = {}
+                total_reactions = 0
+                
                 for g in greetings:
                     name = g.username
-                    user_counts.setdefault(name, 0)
-                    user_counts[name] += 1
+                    if name not in user_reactions:
+                        user_reactions[name] = 0
+                        latest_times[name] = g.greeting_time
+                    
+                    user_reactions[name] += g.reaction_count
+                    total_reactions += g.reaction_count
+                    
+                    # Update latest time
+                    if g.greeting_time > latest_times[name]:
+                        latest_times[name] = g.greeting_time
 
-                    prev = latest_times.get(name, g.greeting_time)
-                    latest_times[name] = max(prev, g.greeting_time)
-
-                sorted_users = sorted(user_counts.items(), key=lambda x: x[1], reverse=True)
+                # Sort by reaction count (descending)
+                sorted_users = sorted(user_reactions.items(), key=lambda x: x[1], reverse=True)
                 lines = []
-                for i, (user, count) in enumerate(sorted_users, 1):
+                for i, (user, reaction_count) in enumerate(sorted_users, 1):
                     time_str = self.format_time(latest_times[user])
-                    lines.append(f"{i}. **{user}** - {count}x (latest: {time_str})")
+                    reaction_emoji = "🔥" if reaction_count > 5 else "👍" if reaction_count > 2 else "👋"
+                    lines.append(f"{i}. **{user}** - {reaction_count} reactions {reaction_emoji} (latest: {time_str})")
 
                 embed.description = "\n".join(lines)
-                embed.add_field(name="Total Greetings Today", value=str(len(greetings)), inline=True)
-                embed.add_field(name="Unique Users", value=str(len(user_counts)), inline=True)
+                embed.add_field(name="Total Reactions Today", value=str(total_reactions), inline=True)
+                embed.add_field(name="Unique Greeters", value=str(len(user_reactions)), inline=True)
 
                 first = greetings[0]
                 last = greetings[-1]
@@ -68,7 +78,7 @@ class GreetingsCommand(commands.Cog):
                     embed.add_field(name="Latest Greeting", value=f"{last.username} at {self.format_time(last.greeting_time)}", inline=True)
 
             embed.set_footer(
-                text="Say greetings like 'gm', 'moin', 'servus', etc. Use /greeting-help for all options.",
+                text="Reactions show how much the community appreciated your greetings! Use /greeting-help for all options.",
                 icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None
             )
 

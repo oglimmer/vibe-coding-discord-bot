@@ -66,7 +66,63 @@ class DiscordBot(commands.Bot):
             await self.message_handler.handle_message(message)
         
         await self.process_commands(message)
-    
+
+    async def on_reaction_add(self, reaction, user):
+        """Handle when a user adds a reaction to a message"""
+        if user.bot:
+            return
+        
+        try:
+            # Check if this is a reaction to a greeting message
+            greeting_id = self.db_manager.get_greeting_id_by_message(
+                reaction.message.id, 
+                reaction.message.guild.id if reaction.message.guild else None
+            )
+            
+            if greeting_id:
+                success = self.db_manager.save_greeting_reaction(
+                    greeting_id=greeting_id,
+                    user_id=user.id,
+                    username=user.display_name,
+                    reaction_emoji=str(reaction.emoji),
+                    server_id=reaction.message.guild.id if reaction.message.guild else None
+                )
+                
+                if success:
+                    logger.info(f"Saved reaction {reaction.emoji} from {user.display_name} to greeting {greeting_id}")
+                else:
+                    logger.error(f"Failed to save reaction {reaction.emoji} from {user.display_name} to greeting {greeting_id}")
+                    
+        except Exception as e:
+            logger.error(f"Error handling reaction add: {e}")
+
+    async def on_reaction_remove(self, reaction, user):
+        """Handle when a user removes a reaction from a message"""
+        if user.bot:
+            return
+        
+        try:
+            # Check if this is a reaction to a greeting message
+            greeting_id = self.db_manager.get_greeting_id_by_message(
+                reaction.message.id, 
+                reaction.message.guild.id if reaction.message.guild else None
+            )
+            
+            if greeting_id:
+                success = self.db_manager.remove_greeting_reaction(
+                    greeting_id=greeting_id,
+                    user_id=user.id,
+                    reaction_emoji=str(reaction.emoji)
+                )
+                
+                if success:
+                    logger.info(f"Removed reaction {reaction.emoji} from {user.display_name} to greeting {greeting_id}")
+                else:
+                    logger.error(f"Failed to remove reaction {reaction.emoji} from {user.display_name} to greeting {greeting_id}")
+                    
+        except Exception as e:
+            logger.error(f"Error handling reaction remove: {e}")
+
     async def on_error(self, event, *args, **kwargs):
         logger.error(f'An error occurred in {event}', exc_info=True)
     

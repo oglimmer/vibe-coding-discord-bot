@@ -68,18 +68,20 @@ class MessageHandler:
             greeting_message = message.content
             server_id = message.guild.id if message.guild else None
             channel_id = message.channel.id
+            message_id = message.id
             
-            success = self.db_manager.save_greeting(
+            greeting_id = self.db_manager.save_greeting(
                 user_id=user_id,
                 username=username,
                 greeting_message=greeting_message,
                 server_id=server_id,
-                channel_id=channel_id
+                channel_id=channel_id,
+                message_id=message_id
             )
             
-            if success:
+            if greeting_id:
                 await message.add_reaction("👋")
-                logger.info(f"Responded to greeting from {username} ({user_id})")
+                logger.info(f"Responded to greeting from {username} ({user_id}) with ID {greeting_id}")
             else:
                 logger.error(f"Failed to save greeting from {username} ({user_id})")
                 
