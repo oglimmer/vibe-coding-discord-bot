@@ -94,11 +94,13 @@ class Game1337Logic:
                     hour, minute, second = groups
                     ms = '000'
                 elif len(groups) == 2:  # ss.SSS
-                    hour, minute = '13', '37'
+                    game_start_time = self.parse_game_start_time()
+                    hour, minute = str(game_start_time.hour), str(game_start_time.minute)
                     second, ms = groups
                     ms = ms.ljust(3, '0')[:3]
                 else:  # ss
-                    hour, minute = '13', '37'
+                    game_start_time = self.parse_game_start_time()
+                    hour, minute = str(game_start_time.hour), str(game_start_time.minute)
                     second = groups[0]
                     ms = '000'
 
@@ -287,11 +289,11 @@ class Game1337Logic:
             return {
                 'valid': False,
                 'reason': 'invalid_format',
-                'message': "❌ **Invalid timestamp format!**\n\nSupported formats:\n"
-                          "`3` → 13:37:03.000\n"
-                          "`3.45` → 13:37:03.450\n"
-                          "`13:37:3` → 13:37:03.000\n"
-                          "`13:37:3.333` → 13:37:03.333"
+                'message': f"❌ **Invalid timestamp format!**\n\nSupported formats:\n"
+                          f"`3` → {Config.GAME_START_TIME[:-4]}03.000\n"
+                          f"`3.45` → {Config.GAME_START_TIME[:-4]}03.450\n"
+                          f"`{Config.GAME_START_TIME[:5]}3` → {Config.GAME_START_TIME[:-4]}03.000\n"
+                          f"`{Config.GAME_START_TIME[:5]}3.333` → {Config.GAME_START_TIME[:-4]}03.333"
             }
         
         # Check if timestamp is in the future
@@ -438,7 +440,7 @@ class Game1337Logic:
         else:
             embed_data['fields'].append({
                 'name': 'Status',
-                'value': '⏳ Waiting for 13:37...',
+                'value': f'⏳ Waiting for {Config.GAME_START_TIME[:5]}...',
                 'inline': False
             })
 
@@ -511,7 +513,7 @@ class Game1337Logic:
                 'inline': False
             })
         
-        embed_data['footer_text'] = '🎮 Join tomorrow\'s battle at 13:37! Use /1337 or /1337-early-bird'
+        embed_data['footer_text'] = f'🎮 Join tomorrow\'s battle at {Config.GAME_START_TIME[:5]}! Use /1337 or /1337-early-bird'
         
         return embed_data
 
