@@ -17,6 +17,12 @@ A professional Discord bot written in Python 3.12 that responds to greetings wit
 - MariaDB database server
 - Discord bot token
 
+or just go with
+
+```bash
+SERGEANT_ROLE_ID=??? COMMANDER_ROLE_ID=??? GENERAL_ROLE_ID=??? ANNOUNCEMENT_CHANNEL_ID=??? DISCORD_TOKEN=??? docker compose up --build
+```
+
 ## Installation
 
 1. Clone the repository:
@@ -47,6 +53,12 @@ DB_PORT=3306
 DB_USER=your_database_user
 DB_PASSWORD=your_database_password
 DB_NAME=discord_bot
+
+GAME_START_TIME=13:37:00.000
+SERGEANT_ROLE_ID=
+COMMANDER_ROLE_ID=
+GENERAL_ROLE_ID=
+ANNOUNCEMENT_CHANNEL_ID=
 ```
 
 ## Usage
@@ -56,55 +68,9 @@ DB_NAME=discord_bot
 python main.py
 ```
 
-2. Invite the bot to your Discord server with the following permissions:
-   - Send Messages
-   - Use Slash Commands
-   - Read Message History
-
-## Commands
-
-- `/greetings` - Shows all users who have greeted today with statistics
-
-## Architecture
-
-The bot follows a professional modular architecture:
-
-```
-├── main.py                 # Main bot entry point
-├── config.py              # Configuration and logging setup
-├── database.py            # Database connection and operations
-├── handlers/              # Message handlers
-│   └── message_handler.py # Greeting message processing
-├── commands/              # Slash commands
-│   └── greetings_command.py # Daily greetings statistics
-└── tests/                 # Unit tests
-    └── test_message_handler.py
-```
-
-### Key Components
-
-- **DiscordBot**: Main bot class extending discord.ext.commands.Bot
-- **DatabaseManager**: Handles MariaDB connections and operations
-- **MessageHandler**: Processes incoming messages for greetings
-- **GreetingsCommand**: Implements the /greetings slash command
-
 ## Database Schema
 
-The bot creates a `greetings` table with the following structure:
-
-```sql
-CREATE TABLE greetings (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
-    username VARCHAR(255) NOT NULL,
-    greeting_message TEXT,
-    greeting_date DATE NOT NULL,
-    greeting_time TIME NOT NULL,
-    server_id BIGINT,
-    channel_id BIGINT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
+Will be created automatically.
 
 ## Extensibility
 

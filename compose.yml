@@ -20,6 +20,15 @@ services:
     build: .
     environment:
       - DB_HOST=mariadb
+      - DB_NAME=vibe-bot
+      - DB_USER=vibe-bot
+      - DB_PASSWORD=foobar
+      - TZ=Europe/Berlin
+      - GAME_START_TIME=13:37:00.000
+      - SERGEANT_ROLE_ID=${SERGEANT_ROLE_ID}
+      - COMMANDER_ROLE_ID=${COMMANDER_ROLE_ID}
+      - GENERAL_ROLE_ID=${GENERAL_ROLE_ID}
+      - ANNOUNCEMENT_CHANNEL_ID=${ANNOUNCEMENT_CHANNEL_ID}
       - DISCORD_TOKEN=${DISCORD_TOKEN}
     depends_on:
         mariadb:
