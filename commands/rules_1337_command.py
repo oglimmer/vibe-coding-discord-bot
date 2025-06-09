@@ -88,10 +88,15 @@ class Rules1337Command(commands.Cog):
         embed.add_field(
             name='⚠️ 3-Second Penalty for Early Bird',
             value='Early bird bets can only win if they are more than 3 seconds apart from the closest regular bet.\n\n'
-                  '**Example**:\n'
+                  '**Example**: \n'
                   '• Early bird at 13:37:25, Regular at 13:37:28, Win time at 13:37:30\n'
-                  '• Early bird is closer (2s vs 5s), but only 3s apart from regular\n'
-                  '• **Result**: Regular bet wins (penalty applies)',
+                  '• Regular is closer (2s vs 5s from win time)\n'
+                  '• **Result**: Regular bet wins (closer to win time)\n'
+                  '\n'
+                  '**Example with Penalty**:\n'
+                  '• Early bird at 13:37:28, Regular at 13:37:25, Win time at 13:37:30\n'
+                  '• Early bird is closer (2s vs 5s from win time), but only 3s apart from regular\n'
+                  '• **Result**: Regular bet wins (early bird closer but within 3s of regular)\n',
             inline=False
         )
 
