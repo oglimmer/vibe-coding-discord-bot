@@ -26,6 +26,13 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmariadb-dev mariadb-client
 
       - name: Install dependencies
         run: |
@@ -39,10 +46,7 @@ jobs:
       - name: Test syntax check
         run: |
           echo "Checking syntax of all Python files..."
-          python -m py_compile *.py
-          python -m py_compile game/*.py
-          python -m py_compile commands/*.py
-          python -m py_compile tests/*.py
+          find . -name "*.py" -not -path "./venv/*" | xargs python -m py_compile
           echo "All Python files have valid syntax!"
 
   build-and-push:
