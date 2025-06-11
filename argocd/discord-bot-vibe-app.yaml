@@ -9,6 +9,8 @@ metadata:
     notifications.argoproj.io/subscribe.on-sync-succeeded.discord: ""
     notifications.argoproj.io/subscribe.on-sync-failed.discord: ""
     notifications.argoproj.io/subscribe.on-health-degraded.discord: ""
+    argocd-image-updater.argoproj.io/image-list: botalias=ghcr.io/oglimmer/vibe-coding-discord-bot:latest
+    argocd-image-updater.argoproj.io/botalias.update-strategy: digest
 spec:
   project: default
   source:

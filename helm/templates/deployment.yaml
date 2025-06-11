@@ -48,13 +48,13 @@ spec:
             - name: DISCORD_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "discord-bot-vibe.fullname" . }}-secrets
-                  key: discord-token
+                  name: discord-bot-secrets
+                  key: DISCORD_TOKEN
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "discord-bot-vibe.fullname" . }}-secrets
-                  key: db-password
+                  name: discord-bot-secrets
+                  key: DB_PASSWORD
       volumes:
         - name: tmp-logs
           emptyDir: {}

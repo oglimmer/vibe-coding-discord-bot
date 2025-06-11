@@ -25,10 +25,23 @@ SERGEANT_ROLE_ID=??? COMMANDER_ROLE_ID=??? GENERAL_ROLE_ID=??? ANNOUNCEMENT_CHAN
 
 ## Installation on k8s
 
+Create a Kubernetes secret with your Discord bot token and database password:
+
 ```bash
-helm install discord-bot ./helm \
-    --set secrets.discordToken="your-token" \
-    --set secrets.dbPassword="your-password"
+kubectl create secret generic discord-bot-vibe-secrets \
+          --from-literal=DB_PASSWORD="XXX" \
+          --from-literal=DISCORD_TOKEN="XXX" \
+          --namespace=default
+```
+
+either via Helm or ArgoCD:
+
+```bash
+helm install discord-bot ./helm
+
+# or via ArgoCD
+
+kubectl apply -f argocd/discord-bot-vibe-app.yaml
 ```
 
 ## Installation anywhere

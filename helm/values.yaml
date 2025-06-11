@@ -83,8 +83,17 @@ env:
   GENERAL_ROLE_ID: "1381201618414080060"
   ANNOUNCEMENT_CHANNEL_ID: "1372659708045033616"
 
-# Secrets should be provided via external sources (e.g., sealed-secrets, external-secrets, etc.)
-# For development, these can be set directly, but should be overridden in production
+# Secrets configuration - using SealedSecrets
 secrets:
-  discordToken: ""  # Set via --set secrets.discordToken=<value> or values override
-  dbPassword: ""    # Set via --set secrets.dbPassword=<value> or values override
+  # These should remain empty in values.yaml - secrets come from SealedSecret
+  discordToken: ""
+  dbPassword: ""
+
+# Secret reference configuration for SealedSecrets
+secretRef:
+  name: discord-bot-secrets  # Name matches the SealedSecret target
+  enabled: true
+
+# SealedSecret configuration
+sealedSecrets:
+  enabled: true  # Enable SealedSecret dependency
