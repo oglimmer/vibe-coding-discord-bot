@@ -92,3 +92,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
+            GIT_BRANCH=${{ github.ref_name }}
+            GIT_REVISION=${{ github.sha }}

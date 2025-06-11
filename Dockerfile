@@ -1,6 +1,11 @@
 # Use Python 3.12 slim image as base
 FROM python:3.12-slim
 
+# Build arguments for git information
+ARG BUILD_TIME
+ARG GIT_BRANCH
+ARG GIT_REVISION
+
 # Set working directory
 WORKDIR /app
 
@@ -19,6 +24,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
+
+# Create build-info.json with build arguments
+RUN echo "{\"build_time\":\"${BUILD_TIME}\",\"git_branch\":\"${GIT_BRANCH}\",\"git_revision\":\"${GIT_REVISION}\"}" > build-info.json
 
 # Create a non-root user for security
 RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app

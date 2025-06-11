@@ -6,3 +6,4 @@ bin/
 bot.log
 lib/
 pyvenv.cfg
+.git
