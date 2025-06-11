@@ -21,6 +21,18 @@ class TestMessageHandler(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.message_handler._is_greeting("huhu"))
         self.assertFalse(self.message_handler._is_greeting("gnome"))
         self.assertFalse(self.message_handler._is_greeting("mourning coffee"))
+    
+    def test_greeting_word_limit_validation(self):
+        # Valid greetings (2 words or less on each side)
+        self.assertTrue(self.message_handler._is_greeting("hey there friend"))  # 0 before, 1 after
+        self.assertTrue(self.message_handler._is_greeting("oh hi there"))  # 1 before, 1 after
+        self.assertTrue(self.message_handler._is_greeting("well good morning everyone"))  # 1 before, 1 after
+        self.assertTrue(self.message_handler._is_greeting("so hey buddy"))  # 1 before, 1 after
+        
+        # Invalid greetings (more than 2 words on either side)
+        self.assertFalse(self.message_handler._is_greeting("I was just thinking good morning everyone today"))  # 4 before, 2 after
+        self.assertFalse(self.message_handler._is_greeting("hey there my good friend today"))  # 0 before, 4 after
+        self.assertFalse(self.message_handler._is_greeting("well I think hey there sounds nice today"))  # 3 before, 3 after
 
     async def test_handle_greeting_message(self):
         message = Mock()

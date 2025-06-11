@@ -57,9 +57,26 @@ class MessageHandler:
             await self._handle_greeting(message)
 
     def _is_greeting(self, content):
+        words = content.split()
+        
         for pattern in self.greeting_patterns:
-            if re.search(pattern, content, re.IGNORECASE):
-                return True
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                # Find the position of the matched greeting in the word list
+                greeting_text = match.group()
+                greeting_words = greeting_text.split()
+                
+                # Find where the greeting starts in the word list
+                for i in range(len(words) - len(greeting_words) + 1):
+                    if ' '.join(words[i:i+len(greeting_words)]).lower() == greeting_text.lower():
+                        # Check words before greeting (max 2)
+                        words_before = i
+                        # Check words after greeting (max 2)
+                        words_after = len(words) - (i + len(greeting_words))
+                        
+                        if words_before <= 2 and words_after <= 2:
+                            return True
+                        break
         return False
 
     async def _handle_greeting(self, message):
