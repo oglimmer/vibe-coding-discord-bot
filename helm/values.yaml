@@ -1,0 +1,86 @@
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+image:
+  repository: ghcr.io/oglimmer/vibe-coding-discord-bot
+  tag: latest
+  pullPolicy: Always
+
+imagePullSecrets:
+  - name: oglimmerregistrykey
+
+resources:
+  requests:
+    memory: "400Mi"
+    cpu: "25m"
+  limits:
+    memory: "768Mi"
+    cpu: "100m"
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 1000
+
+env:
+  TZ: "Europe/Berlin"
+  DB_HOST: "mariadb"
+  DB_NAME: "vibe-bot"
+  DB_USER: "vibe-bot"
+  GAME_START_TIME: "13:37:00.000"
+  SERGEANT_ROLE_ID: "1381201522238423122"
+  COMMANDER_ROLE_ID: "1381201615155101857"
+  GENERAL_ROLE_ID: "1381201618414080060"
+  ANNOUNCEMENT_CHANNEL_ID: "1372659708045033616"
+
+# Secrets should be provided via external sources (e.g., sealed-secrets, external-secrets, etc.)
+# For development, these can be set directly, but should be overridden in production
+secrets:
+  discordToken: ""  # Set via --set secrets.discordToken=<value> or values override
+  dbPassword: ""    # Set via --set secrets.dbPassword=<value> or values override

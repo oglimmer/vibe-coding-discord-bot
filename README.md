@@ -23,7 +23,15 @@ or just go with
 SERGEANT_ROLE_ID=??? COMMANDER_ROLE_ID=??? GENERAL_ROLE_ID=??? ANNOUNCEMENT_CHANNEL_ID=??? DISCORD_TOKEN=??? docker compose up --build
 ```
 
-## Installation
+## Installation on k8s
+
+```bash
+helm install discord-bot ./helm \
+    --set secrets.discordToken="your-token" \
+    --set secrets.dbPassword="your-password"
+```
+
+## Installation anywhere
 
 1. Clone the repository:
 ```bash
