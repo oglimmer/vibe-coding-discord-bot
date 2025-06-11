@@ -25,7 +25,18 @@ SERGEANT_ROLE_ID=??? COMMANDER_ROLE_ID=??? GENERAL_ROLE_ID=??? ANNOUNCEMENT_CHAN
 
 ## Installation on k8s
 
-Create a Kubernetes secret with your Discord bot token and database password:
+For a production deployment, you can use Sealed Secrets to securely manage your secrets in Kubernetes. First, ensure you have `kubeseal` installed and the Sealed Secrets controller running in your cluster:
+
+```bash
+kubectl create secret generic discord-bot-secrets \
+  --from-literal=DISCORD_TOKEN="XXX" \
+  --from-literal=DB_PASSWORD="XXX" \
+  --namespace=default \
+  --dry-run=client -o yaml | \
+  kubeseal -o yaml > sealed-secrets/discord-bot-sealedsecret.yaml
+```
+
+for a test deployment, you can create a Kubernetes secret directly:
 
 ```bash
 kubectl create secret generic discord-bot-vibe-secrets \
@@ -34,7 +45,7 @@ kubectl create secret generic discord-bot-vibe-secrets \
           --namespace=default
 ```
 
-either via Helm or ArgoCD:
+On production use this ArgoCD:
 
 ```bash
 helm install discord-bot ./helm
