@@ -60,6 +60,13 @@ class DiscordBot(commands.Bot):
         logger.info(f'{self.user} has connected to Discord!')
         logger.info(f'Bot is in {len(self.guilds)} guilds')
         
+        # Create readiness indicator for k8s probes
+        try:
+            with open('/tmp/bot_ready', 'w') as f:
+                f.write('ready')
+        except Exception as e:
+            logger.warning(f"Could not create readiness file: {e}")
+        
         activity = discord.Game(name="Greeting everyone! =K")
         await self.change_presence(activity=activity)
     
