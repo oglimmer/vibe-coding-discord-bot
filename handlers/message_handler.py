@@ -19,11 +19,12 @@ class MessageHandler:
 
         # German greetings
         german_greetings = [
-            "guten morgen", "morgen", "moin", "moin moin",
+            "guten morgen", "moin",
             "servus", "hallo", "hi", "hey", "tach", "tag",
-            "guten tag", "guten abend", "abend", "n8", "nacht",
+            "guten tag", "guten abend", "n8", "nacht",
             "gute nacht", "tschüss", "ciao", "bye", "tschau",
-            "grüß dich", "na", "alles klar", "na du", "ey", "was geht"
+            "grüß dich", "na", "alles klar", "na du", "ey", "was geht",
+            "hallihallo", "halöle", "mosche"
         ]
 
         # Regional variations (Austria/Switzerland)
@@ -41,11 +42,11 @@ class MessageHandler:
             "annyeong", "hej", "hallå", "hei", "hola amigo",
             "ola", "ahlan", "salaam", "merhaba", "dobry den"
         ]
-        
+
         # Combine all greetings and create regex patterns
         all_greetings = english_greetings + german_greetings + regional_greetings + international_greetings
         self.greeting_patterns = [rf'\b{re.escape(greeting)}\b' for greeting in all_greetings]
-    
+
     async def handle_message(self, message):
         if message.author.bot:
             return
@@ -54,13 +55,13 @@ class MessageHandler:
         
         if self._is_greeting(content):
             await self._handle_greeting(message)
-    
+
     def _is_greeting(self, content):
         for pattern in self.greeting_patterns:
             if re.search(pattern, content, re.IGNORECASE):
                 return True
         return False
-    
+
     async def _handle_greeting(self, message):
         try:
             user_id = message.author.id
