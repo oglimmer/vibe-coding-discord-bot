@@ -1,6 +1,24 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
-  ]
+    "config:recommended",
+    ":enableVulnerabilityAlerts",
+    ":dependencyDashboard"
+  ],
+  "prHourlyLimit": 30,
+  "prConcurrentLimit": 30,
+  "timezone": "Europe/Berlin",
+  "dependencyDashboard": true,
+  "rangeStrategy": "auto",
+  "schedule": ["before 5am on monday"],
+  "automerge": false,
+  "major": {
+    "automerge": false
+  },
+  "minor": {
+    "automerge": true
+  },
+  "patch": {
+    "automerge": true
+  }
 }
