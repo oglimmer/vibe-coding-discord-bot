@@ -38,8 +38,7 @@ class Game1337Command(commands.Cog):
     @daily_scheduler.before_loop
     async def before_daily_scheduler(self):
         await self.bot.wait_until_ready()
-        # Schedule the first winner determination immediately after startup
-        await self._schedule_next_winner_determination()
+        logger.debug("Bot is ready, daily scheduler will start")
 
     async def _schedule_next_winner_determination(self):
         """Calculate and schedule the exact time for winner determination"""
