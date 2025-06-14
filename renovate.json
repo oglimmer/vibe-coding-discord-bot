@@ -38,17 +38,16 @@
       ]
     },
     {
-      "description": "Prevent Python major version updates in GitHub Actions",
+      "description": "Restrict Python version in GitHub Actions workflows",
       "matchManagers": [
         "github-actions"
       ],
-      "matchPackageNames": [
-        "actions/setup-python"
-      ],
-      "matchFileNames": [
+      "matchFiles": [
         ".github/workflows/**"
       ],
-      "followTag": "v4",
+      "matchStrings": [
+        "uses: actions/setup-python@.*?\\s+with:\\s*\\{?\\s*python-version:\\s*['\"]?([^\\s\\}'\"#]+)"
+      ],
       "allowedVersions": "/^3\\.12\\./"
     }
   ]
