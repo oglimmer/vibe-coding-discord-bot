@@ -48,7 +48,8 @@
       "matchFileNames": [
         ".github/workflows/**"
       ],
-      "followTag": "v4"
+      "followTag": "v4",
+      "allowedVersions": "/^3\\.12\\./"
     }
   ]
 }
