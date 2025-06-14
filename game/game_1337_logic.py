@@ -484,76 +484,59 @@ class Game1337Logic:
 
         return embed_data
 
-    def create_winner_embed_data(self, winner_data: Dict[str, Any], winner_role: str, 
-                                top_14_day: Optional[Dict[str, Any]], 
-                                top_365_day: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Create data for winner announcement embed (Discord-independent)"""
-        embed_data = {
-            'title': '🏆 Daily 1337 Winner Announced!',
-            'color': 0x00FF00,
-            'fields': []
-        }
+    def create_winner_message(self, winner_data: Dict[str, Any], 
+                             top_14_day: Optional[Dict[str, Any]], 
+                             top_365_day: Optional[Dict[str, Any]],
+                             guild_id: Optional[int] = None,
+                             current_role_holders: Optional[Dict[str, Any]] = None) -> str:
+        """Create plain text winner announcement message"""
+
+        # Start with winner announcement
+        bet_type = "early bird" if winner_data['bet_type'] == 'early_bird' else "regular"
+        message_lines = [
+            f"**{winner_data['username']}** won with a {bet_type} bet",
+            f"Winners bet time: {self.format_time_with_ms(winner_data['play_time'])} - Win time: {self.format_time_with_ms(winner_data['win_time'])})",
+            f"Performance: {winner_data['millisecond_diff']}ms before win time"
+        ]
         
-        # Winner info
-        embed_data['fields'].append({
-            'name': '🎯 Winner',
-            'value': f"**{winner_data['username']}**",
-            'inline': True
-        })
+        # Add role assignments only if roles have actually changed
+        if guild_id and current_role_holders:
+            # Get new role assignments
+            new_role_assignments = self.determine_new_role_assignments(winner_data, top_14_day, top_365_day)
+            role_changes = []
+            
+            # Check each role for changes
+            for role_type in ['general', 'commander', 'sergeant']:
+                # Get current holder
+                current_holder = current_role_holders.get(role_type)
+                current_user_id = current_holder['user_id'] if current_holder else None
+                
+                # Get new holder
+                new_user_id = new_role_assignments.get(role_type)
+                
+                # Only add to message if the user is actually changing
+                if current_user_id != new_user_id:
+                    # Find the appropriate user data for this role
+                    user_to_display = None
+                    if role_type == 'general' and top_365_day and top_365_day['user_id'] == new_user_id:
+                        user_to_display = top_365_day
+                    elif role_type == 'commander' and top_14_day and top_14_day['user_id'] == new_user_id:
+                        user_to_display = top_14_day
+                    elif role_type == 'sergeant' and winner_data['user_id'] == new_user_id:
+                        user_to_display = winner_data
+                    
+                    if user_to_display:
+                        role_name = role_type.capitalize()
+                        if user_to_display == winner_data:
+                            role_changes.append(f"New {role_name}: {user_to_display['username']}")
+                        else:
+                            role_changes.append(f"New {role_name}: {user_to_display['username']} ({user_to_display['wins']} wins)")
+            
+            if role_changes:
+                message_lines.append("")
+                message_lines.extend(role_changes)
         
-        # Timing info
-        embed_data['fields'].append({
-            'name': '⏰ Bet Time',
-            'value': f"`{self.format_time_with_ms(winner_data['play_time'])}`",
-            'inline': True
-        })
-        
-        embed_data['fields'].append({
-            'name': '🎲 Win Time',
-            'value': f"`{self.format_time_with_ms(winner_data['win_time'])}`",
-            'inline': True
-        })
-        
-        # Performance info
-        bet_type_emoji = "🐦 Early Bird" if winner_data['bet_type'] == 'early_bird' else "⚡ Regular"
-        embed_data['fields'].append({
-            'name': '📊 Performance',
-            'value': f"{bet_type_emoji}\n**{winner_data['millisecond_diff']}ms** before win time",
-            'inline': True
-        })
-        
-        # Role info
-        embed_data['fields'].append({
-            'name': '🏅 New Role',
-            'value': winner_role,
-            'inline': True
-        })
-        
-        # Total wins
-        user_total_wins = self.get_winner_stats(user_id=winner_data['user_id'])
-        embed_data['fields'].append({
-            'name': '🏆 Total Wins',
-            'value': f"**{user_total_wins}** wins",
-            'inline': True
-        })
-        
-        # Add role hierarchy info if there are role changes
-        role_updates = []
-        if top_365_day:
-            role_updates.append(f"🎖️ **General:** {top_365_day['username']} ({top_365_day['wins']} wins)")
-        if top_14_day and (not top_365_day or top_14_day['user_id'] != top_365_day['user_id']):
-            role_updates.append(f"🔥 **Commander:** {top_14_day['username']} ({top_14_day['wins']} wins)")
-        
-        if role_updates:
-            embed_data['fields'].append({
-                'name': '👑 Current Leaders',
-                'value': "\n".join(role_updates),
-                'inline': False
-            })
-        
-        embed_data['footer_text'] = f'🎮 Join tomorrow\'s battle at {Config.GAME_START_TIME[:5]}! Use /1337 or /1337-early-bird'
-        
-        return embed_data
+        return "\n".join(message_lines)
 
     def get_stats_page_data(self, page: int) -> Dict[str, Any]:
         """Get statistics page data (Discord-independent)"""

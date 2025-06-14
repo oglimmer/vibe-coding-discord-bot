@@ -29,6 +29,8 @@ COPY . .
 # Create build-info.json with build arguments
 RUN echo "{\"build_time\":\"${BUILD_TIME}\",\"git_branch\":\"${GIT_BRANCH}\",\"git_revision\":\"${GIT_REVISION}\"}" > build-info.json
 
+RUN python -m unittest discover tests
+
 # Create a non-root user for security
 RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
 USER app

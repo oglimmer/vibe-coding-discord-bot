@@ -136,13 +136,22 @@ class Game1337Command(commands.Cog):
             await self._announce_catastrophic_event()
             return
 
+        # Get current role holders before updating roles
+        current_role_holders = {}
+        for guild in self.bot.guilds:
+            current_role_holders[guild.id] = {
+                'general': self.db_manager.get_role_assignment(guild.id, 'general'),
+                'commander': self.db_manager.get_role_assignment(guild.id, 'commander'), 
+                'sergeant': self.db_manager.get_role_assignment(guild.id, 'sergeant')
+            }
+        
         # Save winner to database
         success = self.game_logic.save_winner(winner_result)
         
         if success:
             logger.info(f"Winner saved to database successfully")
             await self._update_roles()
-            await self._announce_winner(winner_result)
+            await self._announce_winner(winner_result, current_role_holders)
         else:
             logger.error(f"Failed to save winner to database")
 
@@ -275,7 +284,7 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
             if not success:
                 logger.error(f"Failed to update database for {role_type} assignment to {member.display_name}")
 
-    async def _announce_winner(self, winner_data):
+    async def _announce_winner(self, winner_data, current_role_holders):
         """Announce the daily winner to configured channels"""
         try:
             # Get role information for announcement
@@ -285,50 +294,28 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
             top_14_day = winner_14_days[0] if winner_14_days else None
             top_365_day = winner_365_days[0] if winner_365_days else None
             
-            # Determine winner's new role
-            winner_role = self.game_logic.get_winner_role_name(winner_data)
-            
-            # Create winner announcement embed
-            embed = self._create_winner_embed(winner_data, winner_role, top_14_day, top_365_day)
-            
             # Send to configured announcement channel or fallback to first available channel
-            await self._send_winner_announcement(embed)
+            await self._send_winner_announcement(winner_data, top_14_day, top_365_day, current_role_holders)
                 
         except Exception as e:
             logger.error(f"Error in winner announcement: {e}")
 
-    def _create_winner_embed(self, winner_data, winner_role, top_14_day, top_365_day):
-        """Create the winner announcement embed"""
-        embed_data = self.game_logic.create_winner_embed_data(winner_data, winner_role, top_14_day, top_365_day)
-        
-        embed = discord.Embed(
-            title=embed_data['title'],
-            color=embed_data['color'],
-            timestamp=datetime.now()
-        )
-        
-        for field in embed_data['fields']:
-            embed.add_field(
-                name=field['name'],
-                value=field['value'],
-                inline=field['inline']
-            )
-        
-        embed.set_footer(text=embed_data['footer_text'])
-        
-        return embed
 
-    async def _send_winner_announcement(self, embed):
+    async def _send_winner_announcement(self, winner_data, top_14_day, top_365_day, current_role_holders):
         """Send winner announcement to all guilds"""
         message_sent = False
         
         for guild in self.bot.guilds:
             try:
+                # Create guild-specific message with role change info
+                guild_current_roles = current_role_holders.get(guild.id, {})
+                message = self.game_logic.create_winner_message(winner_data, top_14_day, top_365_day, guild.id, guild_current_roles)
+                
                 # Try configured announcement channel first
                 if Config.ANNOUNCEMENT_CHANNEL_ID:
                     announcement_channel = guild.get_channel(Config.ANNOUNCEMENT_CHANNEL_ID)
                     if announcement_channel and announcement_channel.permissions_for(guild.me).send_messages:
-                        await announcement_channel.send(embed=embed)
+                        await announcement_channel.send(message)
                         logger.info(f"Winner announced in configured channel: {announcement_channel.name} (Guild: {guild.name})")
                         message_sent = True
                         continue
@@ -336,7 +323,7 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
                 # Fallback to first available text channel
                 for channel in guild.text_channels:
                     if channel.permissions_for(guild.me).send_messages:
-                        await channel.send(embed=embed)
+                        await channel.send(message)
                         logger.info(f"Winner announced in fallback channel: {channel.name} (Guild: {guild.name})")
                         message_sent = True
                         break
