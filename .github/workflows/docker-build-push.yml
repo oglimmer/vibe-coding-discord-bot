@@ -8,6 +8,10 @@ on:
   release:
     types: [ published ]
 
+concurrency:
+  group: "vibe-coding-discord-bot"
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}

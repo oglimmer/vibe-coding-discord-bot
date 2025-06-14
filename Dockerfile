@@ -35,8 +35,5 @@ RUN python -m unittest discover tests
 RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
 USER app
 
-# Expose port (if needed for health checks or web interface)
-EXPOSE 8000
-
 # Command to run the bot
 CMD ["python", "main.py"]
