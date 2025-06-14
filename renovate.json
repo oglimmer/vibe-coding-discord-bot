@@ -10,7 +10,9 @@
   "timezone": "Europe/Berlin",
   "dependencyDashboard": true,
   "rangeStrategy": "auto",
-  "schedule": ["before 5am on monday"],
+  "schedule": [
+    "before 5am on monday"
+  ],
   "automerge": false,
   "major": {
     "automerge": false
@@ -20,5 +22,33 @@
   },
   "patch": {
     "automerge": true
-  }
+  },
+  "packageRules": [
+    {
+      "description": "Pin Python Docker images to 3.12.x",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "python"
+      ],
+      "allowedVersions": "/^3\\.12\\./",
+      "matchFileNames": [
+        "Dockerfile"
+      ]
+    },
+    {
+      "description": "Prevent Python major version updates in GitHub Actions",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchPackageNames": [
+        "actions/setup-python"
+      ],
+      "matchFileNames": [
+        ".github/workflows/**"
+      ],
+      "followTag": "v4"
+    }
+  ]
 }
