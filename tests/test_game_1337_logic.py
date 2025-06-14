@@ -40,17 +40,19 @@ class TestGame1337Logic(unittest.TestCase):
 
     def test_parse_timestamp_seconds_only(self):
         """Test parsing seconds-only format (ss)"""
-        game_date = date(2023, 12, 25)
-        result = self.logic.parse_timestamp("42", game_date)
-        expected = datetime(2023, 12, 25, 13, 37, 42, 0)
-        self.assertEqual(result, expected)
+        with patch('game.game_1337_logic.Config.GAME_START_TIME', '13:37:00.000'):
+            game_date = date(2023, 12, 25)
+            result = self.logic.parse_timestamp("42", game_date)
+            expected = datetime(2023, 12, 25, 13, 37, 42, 0)
+            self.assertEqual(result, expected)
 
     def test_parse_timestamp_seconds_with_ms(self):
         """Test parsing seconds with milliseconds (ss.SSS)"""
-        game_date = date(2023, 12, 25)
-        result = self.logic.parse_timestamp("25.750", game_date)
-        expected = datetime(2023, 12, 25, 13, 37, 25, 750000)
-        self.assertEqual(result, expected)
+        with patch('game.game_1337_logic.Config.GAME_START_TIME', '13:37:00.000'):
+            game_date = date(2023, 12, 25)
+            result = self.logic.parse_timestamp("25.750", game_date)
+            expected = datetime(2023, 12, 25, 13, 37, 25, 750000)
+            self.assertEqual(result, expected)
 
     def test_parse_timestamp_invalid_format(self):
         """Test parsing invalid timestamp format returns None"""
@@ -78,17 +80,19 @@ class TestGame1337Logic(unittest.TestCase):
 
     def test_parse_timestamp_edge_case_13_37_59(self):
         """Test parsing edge case of 13:37:59"""
-        game_date = date(2023, 12, 25)
-        result = self.logic.parse_timestamp("59", game_date)
-        expected = datetime(2023, 12, 25, 13, 37, 59, 0)
-        self.assertEqual(result, expected)
+        with patch('game.game_1337_logic.Config.GAME_START_TIME', '13:37:00.000'):
+            game_date = date(2023, 12, 25)
+            result = self.logic.parse_timestamp("59", game_date)
+            expected = datetime(2023, 12, 25, 13, 37, 59, 0)
+            self.assertEqual(result, expected)
 
     def test_parse_timestamp_edge_case_13_37_00(self):
         """Test parsing edge case of 13:37:00"""
-        game_date = date(2023, 12, 25)
-        result = self.logic.parse_timestamp("0", game_date)
-        expected = datetime(2023, 12, 25, 13, 37, 0, 0)
-        self.assertEqual(result, expected)
+        with patch('game.game_1337_logic.Config.GAME_START_TIME', '13:37:00.000'):
+            game_date = date(2023, 12, 25)
+            result = self.logic.parse_timestamp("0", game_date)
+            expected = datetime(2023, 12, 25, 13, 37, 0, 0)
+            self.assertEqual(result, expected)
 
     def test_format_time_with_ms(self):
         """Test time formatting with milliseconds"""
@@ -311,7 +315,8 @@ class TestGame1337Logic(unittest.TestCase):
     def test_validate_early_bird_timestamp_success(self):
         """Test successful early bird timestamp validation"""
         current_time = datetime(2023, 12, 25, 13, 30, 0)
-        with patch.object(self.logic, 'get_game_date', return_value=date(2023, 12, 25)):
+        with patch('game.game_1337_logic.Config.GAME_START_TIME', '13:37:00.000'), \
+             patch.object(self.logic, 'get_game_date', return_value=date(2023, 12, 25)):
             result = self.logic.validate_early_bird_timestamp("37.500", current_time)
             
             self.assertTrue(result['valid'])
@@ -329,7 +334,8 @@ class TestGame1337Logic(unittest.TestCase):
     def test_validate_early_bird_timestamp_not_future(self):
         """Test early bird timestamp validation when timestamp is not in future"""
         current_time = datetime(2023, 12, 25, 13, 40, 0)  # After the proposed bet time
-        with patch.object(self.logic, 'get_game_date', return_value=date(2023, 12, 25)):
+        with patch('game.game_1337_logic.Config.GAME_START_TIME', '13:37:00.000'), \
+             patch.object(self.logic, 'get_game_date', return_value=date(2023, 12, 25)):
             result = self.logic.validate_early_bird_timestamp("5", current_time)  # 13:37:05
             
             self.assertFalse(result['valid'])
