@@ -45,9 +45,6 @@
       "matchFiles": [
         ".github/workflows/**"
       ],
-      "matchStrings": [
-        "uses: actions/setup-python@.*?\\s+with:\\s*\\{?\\s*python-version:\\s*['\"]?([^\\s\\}'\"#]+)"
-      ],
       "allowedVersions": "/^3\\.12\\./"
     }
   ]
