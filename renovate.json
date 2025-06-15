@@ -42,7 +42,7 @@
       "matchManagers": [
         "github-actions"
       ],
-      "matchFiles": [
+      "matchFileNames": [
         ".github/workflows/**"
       ],
       "allowedVersions": "/^3\\.12\\./"
