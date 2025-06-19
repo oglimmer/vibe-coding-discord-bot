@@ -2,7 +2,7 @@ import asyncio
 import logging
 import signal
 import sys
-from discord.ext import commands
+from discord.ext import commands, tasks
 import discord
 
 from config import Config, setup_logging
@@ -34,10 +34,25 @@ class DiscordBot(commands.Bot):
         
         self.db_manager = None
         self.message_handler = None
+        self.db_health_check_failures = 0
+        self.max_health_check_failures = 3
     
     async def setup_hook(self):
         try:
-            self.db_manager = DatabaseManager()
+            # Initialize database with retry logic
+            retry_count = 3
+            for attempt in range(retry_count):
+                try:
+                    self.db_manager = DatabaseManager()
+                    break
+                except Exception as e:
+                    if attempt < retry_count - 1:
+                        logger.warning(f"Database initialization attempt {attempt + 1} failed: {e}. Retrying in 5 seconds...")
+                        await asyncio.sleep(5)
+                    else:
+                        logger.error(f"Failed to initialize database after {retry_count} attempts: {e}")
+                        raise
+            
             self.message_handler = MessageHandler(self.db_manager)
             
             await setup_greetings_command(self, self.db_manager)
@@ -59,6 +74,11 @@ class DiscordBot(commands.Bot):
     async def on_ready(self):
         logger.info(f'{self.user} has connected to Discord!')
         logger.info(f'Bot is in {len(self.guilds)} guilds')
+        
+        # Start database health monitoring
+        if self.db_manager:
+            self.database_health_monitor.start()
+            logger.info("Database health monitoring started")
         
         # Create readiness indicator for k8s probes
         try:
@@ -135,7 +155,44 @@ class DiscordBot(commands.Bot):
     async def on_error(self, event, *args, **kwargs):
         logger.error(f'An error occurred in {event}', exc_info=True)
     
+    @tasks.loop(minutes=5)
+    async def database_health_monitor(self):
+        """Monitor database health and attempt recovery if needed"""
+        if not self.db_manager:
+            return
+            
+        try:
+            if self.db_manager.health_check():
+                # Reset failure counter on successful health check
+                if self.db_health_check_failures > 0:
+                    logger.info("Database health restored")
+                    self.db_health_check_failures = 0
+            else:
+                self.db_health_check_failures += 1
+                logger.warning(f"Database health check failed (attempt {self.db_health_check_failures}/{self.max_health_check_failures})")
+                
+                if self.db_health_check_failures >= self.max_health_check_failures:
+                    logger.error("Database health check failed multiple times, attempting force reconnect")
+                    if self.db_manager.force_reconnect():
+                        logger.info("Database force reconnect successful")
+                        self.db_health_check_failures = 0
+                    else:
+                        logger.error("Database force reconnect failed")
+                        
+        except Exception as e:
+            logger.error(f"Error in database health monitor: {e}")
+            self.db_health_check_failures += 1
+    
+    @database_health_monitor.before_loop
+    async def before_database_health_monitor(self):
+        await self.wait_until_ready()
+    
     async def close(self):
+        # Stop health monitoring
+        if hasattr(self, 'database_health_monitor'):
+            self.database_health_monitor.cancel()
+            logger.info("Database health monitoring stopped")
+        
         if self.db_manager:
             self.db_manager.close()
         await super().close()

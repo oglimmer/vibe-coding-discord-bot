@@ -5,6 +5,7 @@ import dataclasses
 from datetime import datetime
 from typing import List, Optional
 import time
+import threading
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
@@ -21,51 +22,86 @@ class DatabaseManager:
         self.pool = None
         self.pool_size = pool_size
         self.max_overflow = max_overflow
+        self._pool_lock = threading.Lock()
+        self._pool_healthy = False
         self._create_pool()
         self.create_tables()
     
     def _create_pool(self, retry_count=3, retry_delay=1):
         """Create connection pool with retry logic for network issues"""
-        for attempt in range(retry_count):
-            try:
-                self.pool = mariadb.ConnectionPool(
-                    user=Config.DB_USER,
-                    password=Config.DB_PASSWORD,
-                    host=Config.DB_HOST,
-                    port=Config.DB_PORT,
-                    database=Config.DB_NAME,
-                    pool_name='discord-bot-pool',
-                    pool_size=self.pool_size,
-                    pool_reset_connection=True,
-                    pool_validation_interval=250
-                )
-                logger.info(f"Successfully created MariaDB connection pool (size: {self.pool_size})")
-                return
-            except mariadb.Error as e:
-                if attempt < retry_count - 1:
-                    logger.warning(f"Connection pool creation attempt {attempt + 1} failed: {e}. Retrying in {retry_delay} seconds...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                else:
-                    logger.error(f"Failed to create connection pool after {retry_count} attempts: {e}")
+        with self._pool_lock:
+            for attempt in range(retry_count):
+                try:
+                    if self.pool:
+                        try:
+                            self.pool.close()
+                        except:
+                            pass
+                    
+                    self.pool = mariadb.ConnectionPool(
+                        user=Config.DB_USER,
+                        password=Config.DB_PASSWORD,
+                        host=Config.DB_HOST,
+                        port=Config.DB_PORT,
+                        database=Config.DB_NAME,
+                        pool_name='discord-bot-pool',
+                        pool_size=self.pool_size,
+                        pool_reset_connection=True,
+                        pool_validation_interval=250
+                    )
+                    self._pool_healthy = True
+                    logger.info(f"Successfully created MariaDB connection pool (size: {self.pool_size})")
+                    return
+                except mariadb.Error as e:
+                    self._pool_healthy = False
+                    if attempt < retry_count - 1:
+                        logger.warning(f"Connection pool creation attempt {attempt + 1} failed: {e}. Retrying in {retry_delay} seconds...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                    else:
+                        logger.error(f"Failed to create connection pool after {retry_count} attempts: {e}")
+                        raise
+                except Exception as e:
+                    self._pool_healthy = False
+                    logger.error(f"Unexpected error creating connection pool: {e}")
                     raise
+    
+    def _ensure_pool_healthy(self):
+        """Ensure the connection pool is healthy, recreate if necessary"""
+        if not self._pool_healthy or not self.pool:
+            logger.warning("Database pool is unhealthy, attempting to recreate...")
+            try:
+                self._create_pool()
             except Exception as e:
-                logger.error(f"Unexpected error creating connection pool: {e}")
+                logger.error(f"Failed to recreate database pool: {e}")
                 raise
     
     @contextmanager
     def get_connection(self, retry_count=3, retry_delay=1):
-        """Context manager for getting connections from pool with retry logic"""
+        """Context manager for getting connections from pool with retry logic and pool recovery"""
         connection = None
+        pool_recreated = False
+        
         try:
             for attempt in range(retry_count):
                 try:
+                    # Ensure pool is healthy before attempting connection
+                    if attempt > 0 and not pool_recreated:
+                        self._ensure_pool_healthy()
+                        pool_recreated = True
+                    
                     connection = self.pool.get_connection()
                     # Test connection health
                     connection.ping()
                     yield connection
                     return
+                    
                 except (mariadb.PoolError, mariadb.Error, mariadb.InterfaceError) as e:
+                    # Mark pool as unhealthy on pool-level errors
+                    if isinstance(e, mariadb.PoolError):
+                        self._pool_healthy = False
+                        logger.warning(f"Pool error detected, marking pool as unhealthy: {e}")
+                    
                     if connection:
                         try:
                             connection.close()
@@ -80,6 +116,7 @@ class DatabaseManager:
                     else:
                         logger.error(f"Failed to get connection after {retry_count} attempts: {e}")
                         raise
+                        
                 except Exception as e:
                     if connection:
                         try:
@@ -88,6 +125,7 @@ class DatabaseManager:
                             pass
                     logger.error(f"Unexpected error getting connection: {e}")
                     raise
+                    
         finally:
             if connection:
                 try:
@@ -575,8 +613,49 @@ class DatabaseManager:
             logger.error(f"Error removing role assignment: {e}")
             return False
 
+    def health_check(self):
+        """Perform a health check on the database connection"""
+        try:
+            with self.get_connection() as connection:
+                cursor = connection.cursor()
+                cursor.execute("SELECT 1")
+                result = cursor.fetchone()
+                if result and result[0] == 1:
+                    self._pool_healthy = True
+                    logger.debug("Database health check passed")
+                    return True
+                else:
+                    self._pool_healthy = False
+                    logger.warning("Database health check failed: unexpected result")
+                    return False
+        except Exception as e:
+            self._pool_healthy = False
+            logger.error(f"Database health check failed: {e}")
+            return False
+    
+    def is_healthy(self):
+        """Check if the database connection is healthy without performing a full health check"""
+        return self._pool_healthy and self.pool is not None
+    
+    def force_reconnect(self):
+        """Force a reconnection by recreating the connection pool"""
+        logger.info("Forcing database reconnection...")
+        try:
+            self._create_pool()
+            return self.health_check()
+        except Exception as e:
+            logger.error(f"Failed to force reconnect: {e}")
+            return False
+
     def close(self):
         """Close the connection pool"""
-        if self.pool:
-            self.pool.close()
-            logger.info("Database connection pool closed")
+        with self._pool_lock:
+            if self.pool:
+                try:
+                    self.pool.close()
+                    logger.info("Database connection pool closed")
+                except Exception as e:
+                    logger.warning(f"Error closing connection pool: {e}")
+                finally:
+                    self.pool = None
+                    self._pool_healthy = False
