@@ -39,29 +39,29 @@ resources:
     memory: "768Mi"
     cpu: "100m"
 
-livenessProbe:
-  exec:
-    command:
-    - /bin/sh
-    - -c
-    - |
-      # Check if the main process is running
-      if ! pgrep -f 'python.*main.py' > /dev/null; then
-        exit 1
-      fi
-      # Check last 500 log entries for error patterns
-      if tail -n 500 /proc/1/fd/1 2>/dev/null | grep -q "Loop thread traceback\|WARNING - Shard ID"; then
-        exit 1
-      fi
-      # If stderr logging is separate, check it too
-      if tail -n 500 /proc/1/fd/2 2>/dev/null | grep -q "Loop thread traceback\|WARNING - Shard ID"; then
-        exit 1
-      fi
-      exit 0
-  initialDelaySeconds: 30
-  periodSeconds: 30
-  timeoutSeconds: 10
-  failureThreshold: 3
+  livenessProbe:
+    exec:
+      command:
+        - sh
+        - -c
+        - |
+          # 1) Fail if the bot process died
+          if ! pgrep -f 'python.*main.py'; then
+            echo "process missing" >&2
+            exit 1
+          fi
+
+          # 2) Scan the last 100 lines for critical errors
+          if tail -n100 /var/log/app.log | grep -qE 'Loop thread traceback|WARNING - Shard ID'; then
+            echo "detected error pattern" >&2
+            exit 1
+          fi
+
+          exit 0
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
 
 readinessProbe:
   exec:

@@ -30,9 +30,11 @@ RUN echo "{\"build_time\":\"${BUILD_TIME}\",\"git_branch\":\"${GIT_BRANCH}\",\"g
 
 RUN python -m unittest discover tests
 
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 # Create a non-root user for security
 RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
 USER app
 
-# Command to run the bot
-CMD ["python", "main.py"]
+ENTRYPOINT ["/app/entrypoint.sh"]
