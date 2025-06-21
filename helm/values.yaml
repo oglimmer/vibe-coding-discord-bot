@@ -44,7 +44,20 @@ livenessProbe:
     command:
     - /bin/sh
     - -c
-    - "pgrep -f 'python.*main.py' > /dev/null"
+    - |
+      # Check if the main process is running
+      if ! pgrep -f 'python.*main.py' > /dev/null; then
+        exit 1
+      fi
+      # Check last 500 log entries for error patterns
+      if tail -n 500 /proc/1/fd/1 2>/dev/null | grep -q "Loop thread traceback\|WARNING - Shard ID"; then
+        exit 1
+      fi
+      # If stderr logging is separate, check it too
+      if tail -n 500 /proc/1/fd/2 2>/dev/null | grep -q "Loop thread traceback\|WARNING - Shard ID"; then
+        exit 1
+      fi
+      exit 0
   initialDelaySeconds: 30
   periodSeconds: 30
   timeoutSeconds: 10
