@@ -16,27 +16,28 @@ class GreetingRecord:
 
 class DatabaseManager:
     def __init__(self):
-        self.connection = None
-        self.connect()
         self.create_tables()
     
-    def connect(self):
+    def _get_connection(self):
+        """Get a fresh database connection for each operation"""
         try:
-            self.connection = mariadb.connect(
+            connection = mariadb.connect(
                 user=Config.DB_USER,
                 password=Config.DB_PASSWORD,
                 host=Config.DB_HOST,
                 port=Config.DB_PORT,
                 database=Config.DB_NAME
             )
-            logger.info("Successfully connected to MariaDB")
+            return connection
         except mariadb.Error as e:
             logger.error(f"Error connecting to MariaDB: {e}")
             raise
     
     def create_tables(self):
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS greetings (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -134,19 +135,24 @@ class DatabaseManager:
                 )
             """)
             
-            self.connection.commit()
+            connection.commit()
             logger.info("Database tables created successfully")
         except mariadb.Error as e:
             logger.error(f"Error creating tables: {e}")
             raise
+        finally:
+            if connection:
+                connection.close()
 
     def get_todays_greetings(self, guild_id: Optional[int] = None) -> List[GreetingRecord]:
         """
         Fetch all greetings for the given guild from the start of today until now,
         ordered by greeting_time ascending, with reaction counts.
         """
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             today = datetime.now().date()
             
             if guild_id:
@@ -176,10 +182,15 @@ class DatabaseManager:
         except mariadb.Error as e:
             logger.error(f"Error fetching today's greetings: {e}")
             return []
+        finally:
+            if connection:
+                connection.close()
 
     def save_greeting(self, user_id, username, greeting_message, server_id=None, channel_id=None, message_id=None):
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             now = datetime.now()
             date = now.date()
             time = now.time()
@@ -190,16 +201,21 @@ class DatabaseManager:
             """, (user_id, username, greeting_message, date, time, server_id, channel_id, message_id))
             
             greeting_id = cursor.lastrowid
-            self.connection.commit()
+            connection.commit()
             logger.info(f"Saved greeting for user {username} ({user_id}) with ID {greeting_id}")
             return greeting_id
         except mariadb.Error as e:
             logger.error(f"Error saving greeting: {e}")
             return None
+        finally:
+            if connection:
+                connection.close()
 
     def save_greeting_reaction(self, greeting_id, user_id, username, reaction_emoji, server_id=None):
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             now = datetime.now()
             date = now.date()
             time = now.time()
@@ -211,31 +227,41 @@ class DatabaseManager:
                 reaction_time = VALUES(reaction_time)
             """, (greeting_id, user_id, username, reaction_emoji, date, time, server_id))
             
-            self.connection.commit()
+            connection.commit()
             logger.info(f"Saved reaction {reaction_emoji} from {username} ({user_id}) to greeting {greeting_id}")
             return True
         except mariadb.Error as e:
             logger.error(f"Error saving greeting reaction: {e}")
             return False
+        finally:
+            if connection:
+                connection.close()
 
     def remove_greeting_reaction(self, greeting_id, user_id, reaction_emoji):
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             cursor.execute("""
                 DELETE FROM greeting_reactions 
                 WHERE greeting_id = ? AND user_id = ? AND reaction_emoji = ?
             """, (greeting_id, user_id, reaction_emoji))
             
-            self.connection.commit()
+            connection.commit()
             logger.info(f"Removed reaction {reaction_emoji} from user {user_id} to greeting {greeting_id}")
             return True
         except mariadb.Error as e:
             logger.error(f"Error removing greeting reaction: {e}")
             return False
+        finally:
+            if connection:
+                connection.close()
 
     def get_greeting_id_by_message(self, message_id, server_id=None):
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             if server_id:
                 cursor.execute("""
                     SELECT id FROM greetings 
@@ -254,10 +280,15 @@ class DatabaseManager:
         except mariadb.Error as e:
             logger.error(f"Error getting greeting ID: {e}")
             return None
+        finally:
+            if connection:
+                connection.close()
     
     def save_1337_bet(self, user_id, username, play_time, game_date, bet_type='regular', server_id=None, channel_id=None):
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             cursor.execute("""
                 INSERT INTO game_1337_bets (user_id, username, play_time, game_date, bet_type, server_id, channel_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -267,16 +298,21 @@ class DatabaseManager:
                 username = VALUES(username)
             """, (user_id, username, play_time, game_date, bet_type, server_id, channel_id))
             
-            self.connection.commit()
+            connection.commit()
             logger.info(f"Saved 1337 bet for user {username} ({user_id}) on {game_date}")
             return True
         except mariadb.Error as e:
             logger.error(f"Error saving 1337 bet: {e}")
             return False
+        finally:
+            if connection:
+                connection.close()
     
     def get_user_bet(self, user_id, game_date):
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             cursor.execute("""
                 SELECT user_id, username, play_time, bet_type
                 FROM game_1337_bets 
@@ -295,10 +331,15 @@ class DatabaseManager:
         except mariadb.Error as e:
             logger.error(f"Error fetching user bet: {e}")
             return None
+        finally:
+            if connection:
+                connection.close()
     
     def get_daily_bets(self, game_date):
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             cursor.execute("""
                 SELECT user_id, username, play_time, bet_type, server_id, channel_id
                 FROM game_1337_bets 
@@ -321,10 +362,15 @@ class DatabaseManager:
         except mariadb.Error as e:
             logger.error(f"Error fetching daily bets: {e}")
             return []
+        finally:
+            if connection:
+                connection.close()
     
     def save_1337_winner(self, user_id, username, game_date, win_time, play_time, bet_type, millisecond_diff, server_id=None):
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             cursor.execute("""
                 INSERT INTO game_1337_winners (user_id, username, game_date, win_time, play_time, bet_type, millisecond_diff, server_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -337,16 +383,21 @@ class DatabaseManager:
                 millisecond_diff = VALUES(millisecond_diff)
             """, (user_id, username, game_date, win_time, play_time, bet_type, millisecond_diff, server_id))
             
-            self.connection.commit()
+            connection.commit()
             logger.info(f"Saved 1337 winner for user {username} ({user_id}) on {game_date}")
             return True
         except mariadb.Error as e:
             logger.error(f"Error saving 1337 winner: {e}")
             return False
+        finally:
+            if connection:
+                connection.close()
     
     def get_winner_stats(self, user_id=None, days=None):
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             
             if user_id and days:
                 cursor.execute("""
@@ -393,10 +444,15 @@ class DatabaseManager:
         except mariadb.Error as e:
             logger.error(f"Error fetching winner stats: {e}")
             return 0 if user_id else []
+        finally:
+            if connection:
+                connection.close()
     
     def get_daily_winner(self, game_date):
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             cursor.execute("""
                 SELECT user_id, username, win_time, play_time, bet_type, millisecond_diff
                 FROM game_1337_winners 
@@ -417,11 +473,16 @@ class DatabaseManager:
         except mariadb.Error as e:
             logger.error(f"Error fetching daily winner: {e}")
             return None
+        finally:
+            if connection:
+                connection.close()
 
     def set_role_assignment(self, guild_id, user_id, role_type, role_id):
         """Set or update role assignment for a user in a specific guild"""
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             cursor.execute("""
                 INSERT INTO game_1337_roles (guild_id, user_id, role_type, role_id)
                 VALUES (?, ?, ?, ?)
@@ -431,17 +492,22 @@ class DatabaseManager:
                 updated_at = CURRENT_TIMESTAMP
             """, (guild_id, user_id, role_type, role_id))
             
-            self.connection.commit()
+            connection.commit()
             logger.info(f"Set {role_type} role assignment for user {user_id} in guild {guild_id}")
             return True
         except mariadb.Error as e:
             logger.error(f"Error setting role assignment: {e}")
             return False
+        finally:
+            if connection:
+                connection.close()
     
     def get_role_assignment(self, guild_id, role_type):
         """Get current role assignment for a specific role type in a guild"""
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             cursor.execute("""
                 SELECT user_id, role_id
                 FROM game_1337_roles 
@@ -458,11 +524,16 @@ class DatabaseManager:
         except mariadb.Error as e:
             logger.error(f"Error fetching role assignment: {e}")
             return None
+        finally:
+            if connection:
+                connection.close()
     
     def get_all_role_assignments(self, guild_id):
         """Get all current role assignments for a guild"""
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             cursor.execute("""
                 SELECT user_id, role_type, role_id
                 FROM game_1337_roles 
@@ -481,24 +552,31 @@ class DatabaseManager:
         except mariadb.Error as e:
             logger.error(f"Error fetching all role assignments: {e}")
             return []
+        finally:
+            if connection:
+                connection.close()
     
     def remove_role_assignment(self, guild_id, role_type):
         """Remove role assignment for a specific role type in a guild"""
+        connection = None
         try:
-            cursor = self.connection.cursor()
+            connection = self._get_connection()
+            cursor = connection.cursor()
             cursor.execute("""
                 DELETE FROM game_1337_roles 
                 WHERE guild_id = ? AND role_type = ?
             """, (guild_id, role_type))
             
-            self.connection.commit()
+            connection.commit()
             logger.info(f"Removed {role_type} role assignment in guild {guild_id}")
             return True
         except mariadb.Error as e:
             logger.error(f"Error removing role assignment: {e}")
             return False
+        finally:
+            if connection:
+                connection.close()
 
     def close(self):
-        if self.connection:
-            self.connection.close()
-            logger.info("Database connection closed")
+        # No persistent connection to close
+        logger.info("DatabaseManager closed")

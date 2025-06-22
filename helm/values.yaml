@@ -48,12 +48,14 @@ livenessProbe:
         # 1) Fail if the bot process died
         if ! pgrep -f 'python.*main.py'; then
           echo "process missing" >&2
+          echo "process missing" >/var/log/app.log
           exit 1
         fi
 
         # 2) Scan the last 100 lines for critical errors
-        if tail -n100 /var/log/app.log | grep -qE 'Loop thread traceback|WARNING - Shard ID'; then
+        if tail -n100 /var/log/app.log | grep -qE 'Loop thread traceback|WARNING - Shard ID|database - ERROR - Error'; then
           echo "detected error pattern" >&2
+          echo "detected error pattern" >/var/log/app.log
           exit 1
         fi
 
