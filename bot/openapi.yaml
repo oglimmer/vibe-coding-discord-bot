@@ -1,0 +1,237 @@
+openapi: 3.0.3
+info:
+  title: Discord Bot Webhook API
+  description: Webhook API for receiving notifications from game service and other services
+  version: 1.0.0
+  contact:
+    name: Vibe Platform Bot
+    
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: https://bot.vibe-platform.com
+    description: Production server
+
+security:
+  - bearerAuth: []
+
+paths:
+  /webhook/winner:
+    post:
+      summary: Winner notification webhook
+      description: Receives notifications when a winner is determined in the game
+      operationId: handleWinnerWebhook
+      tags:
+        - webhooks
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WinnerWebhookPayload'
+            examples:
+              winner_determined:
+                summary: Winner determined event
+                value:
+                  event: "winner_determined"
+                  winner:
+                    user_id: "123456789"
+                    username: "PlayerOne"
+                    score: 1337
+                    timestamp: "2023-12-06T13:37:00Z"
+      responses:
+        '200':
+          description: Webhook processed successfully
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "OK"
+        '400':
+          description: Unknown event type
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Unknown event"
+        '401':
+          description: Unauthorized - invalid or missing webhook secret
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Unauthorized"
+        '500':
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal error"
+
+  /webhook/catastrophic:
+    post:
+      summary: Catastrophic event notification webhook
+      description: Receives notifications when a catastrophic event occurs in the game
+      operationId: handleCatastrophicWebhook
+      tags:
+        - webhooks
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatastrophicWebhookPayload'
+            examples:
+              catastrophic_event:
+                summary: Catastrophic event
+                value:
+                  event: "catastrophic_event"
+                  catastrophic_data:
+                    event_type: "server_shutdown"
+                    message: "Game server is going down for maintenance"
+                    timestamp: "2023-12-06T13:37:00Z"
+      responses:
+        '200':
+          description: Webhook processed successfully
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "OK"
+        '400':
+          description: Unknown event type
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Unknown event"
+        '401':
+          description: Unauthorized - invalid or missing webhook secret
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Unauthorized"
+        '500':
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal error"
+
+  /webhook/health:
+    get:
+      summary: Health check endpoint
+      description: Health check for the webhook server
+      operationId: handleHealthWebhook
+      tags:
+        - health
+      security: []
+      responses:
+        '200':
+          description: Webhook server is healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "OK"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Webhook secret token for authentication
+
+  schemas:
+    WinnerWebhookPayload:
+      type: object
+      required:
+        - event
+        - winner
+      properties:
+        event:
+          type: string
+          enum: ["winner_determined"]
+          description: The type of event
+        winner:
+          $ref: '#/components/schemas/WinnerData'
+
+    CatastrophicWebhookPayload:
+      type: object
+      required:
+        - event
+        - catastrophic_data
+      properties:
+        event:
+          type: string
+          enum: ["catastrophic_event"]
+          description: The type of event
+        catastrophic_data:
+          $ref: '#/components/schemas/CatastrophicData'
+
+    WinnerData:
+      type: object
+      required:
+        - user_id
+        - username
+      properties:
+        user_id:
+          type: string
+          description: Discord user ID of the winner
+          example: "123456789"
+        username:
+          type: string
+          description: Display name of the winner
+          example: "PlayerOne"
+        score:
+          type: integer
+          description: Final score of the winner
+          example: 1337
+        timestamp:
+          type: string
+          format: date-time
+          description: When the winner was determined
+          example: "2023-12-06T13:37:00Z"
+        additional_data:
+          type: object
+          description: Additional winner-related data
+          additionalProperties: true
+
+    CatastrophicData:
+      type: object
+      properties:
+        event_type:
+          type: string
+          description: Type of catastrophic event
+          example: "server_shutdown"
+        message:
+          type: string
+          description: Human-readable message about the event
+          example: "Game server is going down for maintenance"
+        timestamp:
+          type: string
+          format: date-time
+          description: When the catastrophic event occurred
+          example: "2023-12-06T13:37:00Z"
+        severity:
+          type: string
+          enum: ["low", "medium", "high", "critical"]
+          description: Severity level of the event
+          example: "high"
+        additional_data:
+          type: object
+          description: Additional event-related data
+          additionalProperties: true
+
+tags:
+  - name: webhooks
+    description: Webhook endpoints for receiving notifications
+  - name: health
+    description: Health check endpoints

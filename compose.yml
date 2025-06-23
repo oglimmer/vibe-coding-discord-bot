@@ -16,20 +16,53 @@ services:
       start_interval: 3s
     ports:
       - "3306:3306"
-  bot:
-    build: .
+  
+  game-service:
+    build: game-service
     environment:
+      - TZ=Europe/Berlin
       - DB_HOST=mariadb
       - DB_NAME=vibe-bot
       - DB_USER=vibe-bot
       - DB_PASSWORD=foobar
+      - GAME_START_TIME=00:36:00.000
+      - PORT=8080
+      - WEBHOOK_URL=http://bot:8080/webhook/winner
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  greeting-service:
+    build: greeting-service
+    environment:
       - TZ=Europe/Berlin
-      - GAME_START_TIME=13:37:00.000
+      - DB_HOST=mariadb
+      - DB_NAME=vibe-bot
+      - DB_USER=vibe-bot
+      - DB_PASSWORD=foobar
+      - PORT=8080
+    depends_on:
+        mariadb:
+            condition: service_healthy
+
+  bot:
+    build: bot
+    environment:
+      - TZ=Europe/Berlin
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
       - SERGEANT_ROLE_ID=${SERGEANT_ROLE_ID}
       - COMMANDER_ROLE_ID=${COMMANDER_ROLE_ID}
       - GENERAL_ROLE_ID=${GENERAL_ROLE_ID}
       - ANNOUNCEMENT_CHANNEL_ID=${ANNOUNCEMENT_CHANNEL_ID}
-      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - PORT=8080
+      - GAME_SERVICE_DOMAIN=game-service
+      - GAME_SERVICE_PORT=8080
+      - GREETING_SERVICE_DOMAIN=greeting-service
+      - GREETING_SERVICE_PORT=8080
     depends_on:
         mariadb:
             condition: service_healthy
+        game-service:
+            condition: service_started
+        greeting-service:
+            condition: service_started

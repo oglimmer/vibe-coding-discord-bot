@@ -1,0 +1,359 @@
+openapi: 3.0.3
+info:
+  title: Greeting Microservice API
+  description: REST API for Discord bot greeting functionality
+  version: 1.0.0
+  contact:
+    name: Vibe Coding Discord Bot
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+paths:
+  /greetings/detect:
+    post:
+      summary: Detect if a message contains a greeting
+      description: Analyzes a message to determine if it contains a valid greeting pattern
+      operationId: detectGreeting
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GreetingDetectionRequest'
+      responses:
+        '200':
+          description: Greeting detection result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GreetingDetectionResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /greetings:
+    post:
+      summary: Save a greeting
+      description: Stores a detected greeting in the database
+      operationId: saveGreeting
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveGreetingRequest'
+      responses:
+        '201':
+          description: Greeting saved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveGreetingResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      summary: Get today's greetings
+      description: Retrieves greeting statistics for today
+      operationId: getTodaysGreetings
+      parameters:
+        - name: guild_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Discord guild ID
+      responses:
+        '200':
+          description: Today's greeting statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TodaysGreetingsResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /greetings/reactions:
+    post:
+      summary: Save a greeting reaction
+      description: Records a reaction to a greeting message
+      operationId: saveGreetingReaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveReactionRequest'
+      responses:
+        '201':
+          description: Reaction saved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveReactionResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: Remove a greeting reaction
+      description: Removes a reaction from a greeting message
+      operationId: removeGreetingReaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemoveReactionRequest'
+      responses:
+        '204':
+          description: Reaction removed successfully
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /greetings/languages:
+    get:
+      summary: Get supported greeting languages
+      description: Returns all supported greeting patterns and languages
+      operationId: getSupportedLanguages
+      responses:
+        '200':
+          description: List of supported greeting languages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportedLanguagesResponse'
+
+  /health:
+    get:
+      summary: Health check
+      description: Returns service health status
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+components:
+  schemas:
+    GreetingDetectionRequest:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: The message text to analyze
+          example: "Good morning everyone!"
+
+    GreetingDetectionResponse:
+      type: object
+      required:
+        - is_greeting
+      properties:
+        is_greeting:
+          type: boolean
+          description: Whether the message contains a valid greeting
+        matched_pattern:
+          type: string
+          description: The greeting pattern that was matched (if any)
+          example: "good morning"
+
+    SaveGreetingRequest:
+      type: object
+      required:
+        - user_id
+        - username
+        - message_id
+        - channel_id
+        - guild_id
+        - message_content
+      properties:
+        user_id:
+          type: string
+          description: Discord user ID
+        username:
+          type: string
+          description: Discord username
+        message_id:
+          type: string
+          description: Discord message ID
+        channel_id:
+          type: string
+          description: Discord channel ID
+        guild_id:
+          type: string
+          description: Discord guild ID
+        message_content:
+          type: string
+          description: The greeting message content
+        timestamp:
+          type: string
+          format: date-time
+          description: When the greeting was sent (ISO 8601 format)
+
+    SaveGreetingResponse:
+      type: object
+      required:
+        - greeting_id
+      properties:
+        greeting_id:
+          type: integer
+          description: The ID of the saved greeting
+
+    TodaysGreetingsResponse:
+      type: object
+      required:
+        - total_reactions
+        - unique_greeters
+        - leaderboard
+      properties:
+        total_reactions:
+          type: integer
+          description: Total number of reactions today
+        unique_greeters:
+          type: integer
+          description: Number of unique users who greeted today
+        first_greeting_time:
+          type: string
+          format: date-time
+          description: Time of first greeting today (ISO 8601 format)
+        latest_greeting_time:
+          type: string
+          format: date-time
+          description: Time of latest greeting today (ISO 8601 format)
+        leaderboard:
+          type: array
+          items:
+            $ref: '#/components/schemas/LeaderboardEntry'
+
+    LeaderboardEntry:
+      type: object
+      required:
+        - username
+        - reaction_count
+      properties:
+        username:
+          type: string
+          description: Discord username
+        reaction_count:
+          type: integer
+          description: Number of reactions received
+        reactions:
+          type: array
+          items:
+            type: string
+          description: List of reaction emojis received
+
+    SaveReactionRequest:
+      type: object
+      required:
+        - message_id
+        - user_id
+        - username
+        - emoji
+      properties:
+        message_id:
+          type: string
+          description: Discord message ID that was reacted to
+        user_id:
+          type: string
+          description: Discord user ID who reacted
+        username:
+          type: string
+          description: Discord username who reacted
+        emoji:
+          type: string
+          description: The emoji used for the reaction
+
+    SaveReactionResponse:
+      type: object
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+          description: Whether the reaction was saved successfully
+
+    RemoveReactionRequest:
+      type: object
+      required:
+        - message_id
+        - user_id
+        - emoji
+      properties:
+        message_id:
+          type: string
+          description: Discord message ID
+        user_id:
+          type: string
+          description: Discord user ID
+        emoji:
+          type: string
+          description: The emoji to remove
+
+    SupportedLanguagesResponse:
+      type: object
+      required:
+        - languages
+      properties:
+        languages:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          description: Map of language names to greeting patterns
+          example:
+            English: ["morning", "good morning", "gm", "hello", "hi"]
+            German: ["guten morgen", "moin", "hallo", "hi"]
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [healthy]
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error type
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          description: Additional error details

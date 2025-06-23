@@ -1,0 +1,597 @@
+openapi: 3.0.3
+info:
+  title: 1337 Game Service API
+  description: Microservice for managing the 1337 betting game logic and operations using MariaDB
+  version: 1.0.0
+  contact:
+    name: Vibe Platform Team
+
+servers:
+  - url: http://localhost:8001
+    description: Local development server
+
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      description: Returns the health status of the service
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /game/validate-bet:
+    post:
+      summary: Validate bet placement
+      description: Validates if a user can place a bet for today's game
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id:
+                  type: integer
+                  description: Discord user ID
+                  example: 123456789012345678
+              required:
+                - user_id
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BetValidationResponse'
+
+  /game/place-bet:
+    post:
+      summary: Place a bet
+      description: Places a regular or early bird bet for a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaceBetRequest'
+      responses:
+        '200':
+          description: Bet placed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaceBetResponse'
+        '400':
+          description: Invalid bet request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /game/validate-early-bird:
+    post:
+      summary: Validate early bird timestamp
+      description: Validates an early bird bet timestamp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timestamp:
+                  type: string
+                  description: Timestamp string to validate (HH:MM:SS.mmm format)
+                  example: "13:37:00.123"
+              required:
+                - timestamp
+      responses:
+        '200':
+          description: Timestamp validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimestampValidationResponse'
+
+  /game/user-bet/{user_id}:
+    get:
+      summary: Get user's bet information
+      description: Returns the user's bet information for today
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Discord user ID
+          example: 123456789012345678
+      responses:
+        '200':
+          description: User bet information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserBetResponse'
+        '404':
+          description: User has no bet for today
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /game/daily-winner:
+    get:
+      summary: Get daily winner
+      description: Returns the winner for today's game (if determined)
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Game date (defaults to today)
+          example: "2024-01-15"
+      responses:
+        '200':
+          description: Daily winner information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WinnerResponse'
+        '404':
+          description: No winner determined yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /game/stats:
+    get:
+      summary: Get game statistics
+      description: Returns game statistics for different time periods
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+          description: Number of days to include in stats
+          example: 30
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Get stats for specific user
+          example: 123456789012345678
+      responses:
+        '200':
+          description: Game statistics
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlayerStats'
+
+  /game/daily-bets:
+    get:
+      summary: Get daily bets
+      description: Returns all bets for a specific date
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Game date (defaults to today)
+          example: "2024-01-15"
+      responses:
+        '200':
+          description: Daily bets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BetInfo'
+
+  /game/user-info-embed/{user_id}:
+    get:
+      summary: Get user info embed data
+      description: Returns Discord embed data for user's bet information
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Discord user ID
+          example: 123456789012345678
+      responses:
+        '200':
+          description: User info embed data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbedData'
+        '404':
+          description: User has no bet for today
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /game/stats-page/{page}:
+    get:
+      summary: Get statistics page data
+      description: Returns formatted statistics page data for Discord embed
+      parameters:
+        - name: page
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 2
+          description: Page number (0=365days, 1=14days, 2=daily bets)
+          example: 0
+      responses:
+        '200':
+          description: Statistics page data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbedData'
+
+
+components:
+  schemas:
+    BetValidationResponse:
+      type: object
+      required:
+        - valid
+      properties:
+        valid:
+          type: boolean
+          description: Whether the bet validation passed
+          example: true
+        reason:
+          type: string
+          nullable: true
+          description: Reason for validation failure
+          example: "User already has a bet for today"
+        message:
+          type: string
+          nullable: true
+          description: Human-readable message
+          example: "You have already placed a bet for today"
+        existing_bet:
+          $ref: '#/components/schemas/BetInfo'
+          nullable: true
+
+    PlaceBetRequest:
+      type: object
+      properties:
+        user_id:
+          type: integer
+          description: Discord user ID
+          example: 123456789012345678
+        username:
+          type: string
+          description: Discord username
+          example: "player123"
+        bet_type:
+          type: string
+          enum: [regular, early_bird]
+          description: Type of bet to place
+          example: "regular"
+        play_time:
+          type: string
+          format: date-time
+          nullable: true
+          description: For early_bird bets, null for regular bets (uses current time)
+          example: null
+        guild_id:
+          type: integer
+          description: Discord guild ID
+          example: 987654321098765432
+        channel_id:
+          type: integer
+          description: Discord channel ID
+          example: 111222333444555666
+        timestamp:
+          type: string
+          nullable: true
+          description: For early_bird bets only (HH:MM:SS.mmm format)
+          example: "13:37:00.123"
+      required:
+        - user_id
+        - username
+        - bet_type
+        - guild_id
+        - channel_id
+
+    PlaceBetResponse:
+      type: object
+      required:
+        - success
+        - play_time
+        - formatted_time
+      properties:
+        success:
+          type: boolean
+          description: Whether the bet was successfully placed
+          example: true
+        play_time:
+          type: string
+          format: date-time
+          description: The exact play time recorded
+          example: "2024-01-15T13:37:00.123Z"
+        formatted_time:
+          type: string
+          description: Human-readable formatted time with milliseconds
+          example: "13:37:00.123"
+
+    TimestampValidationResponse:
+      type: object
+      required:
+        - valid
+      properties:
+        valid:
+          type: boolean
+          description: Whether the timestamp is valid
+          example: true
+        timestamp:
+          type: string
+          format: date-time
+          nullable: true
+          description: Parsed timestamp if valid
+          example: "2024-01-15T13:37:00.123Z"
+        reason:
+          type: string
+          nullable: true
+          description: Reason for validation failure
+          example: "Invalid timestamp format"
+        message:
+          type: string
+          nullable: true
+          description: Human-readable message
+          example: "Please use format: HH:MM:SS.mmm"
+
+    UserBetResponse:
+      type: object
+      required:
+        - user_id
+        - username
+        - play_time
+        - bet_type
+        - game_date
+        - guild_id
+        - channel_id
+      properties:
+        user_id:
+          type: integer
+          description: Discord user ID
+          example: 123456789012345678
+        username:
+          type: string
+          description: Discord username
+          example: "player123"
+        play_time:
+          type: string
+          format: date-time
+          description: Time the bet was placed
+          example: "2024-01-15T13:37:00.123Z"
+        bet_type:
+          type: string
+          enum: [regular, early_bird]
+          description: Type of bet placed
+          example: "regular"
+        game_date:
+          type: string
+          format: date
+          description: Date of the game
+          example: "2024-01-15"
+        guild_id:
+          type: integer
+          description: Discord guild ID
+          example: 987654321098765432
+        channel_id:
+          type: integer
+          description: Discord channel ID
+          example: 111222333444555666
+
+    WinnerResponse:
+      type: object
+      required:
+        - user_id
+        - username
+        - win_time
+        - play_time
+        - bet_type
+        - millisecond_diff
+        - server_id
+      properties:
+        user_id:
+          type: integer
+          description: Discord user ID of the winner
+          example: 123456789012345678
+        username:
+          type: string
+          description: Discord username of the winner
+          example: "winner123"
+        win_time:
+          type: string
+          format: date-time
+          description: The target win time (13:37:00)
+          example: "2024-01-15T13:37:00.000Z"
+        play_time:
+          type: string
+          format: date-time
+          description: When the winner placed their bet
+          example: "2024-01-15T13:37:00.050Z"
+        bet_type:
+          type: string
+          enum: [regular, early_bird]
+          description: Type of winning bet
+          example: "regular"
+        millisecond_diff:
+          type: integer
+          description: Milliseconds before win time (positive) or after (negative)
+          example: 50
+        server_id:
+          type: integer
+          description: Discord guild ID where the win occurred
+          example: 987654321098765432
+        catastrophic_event:
+          type: boolean
+          nullable: true
+          description: Whether this was a catastrophic event (multiple identical bets)
+          example: false
+        identical_count:
+          type: integer
+          nullable: true
+          description: Number of identical bets if catastrophic event
+          example: null
+
+    PlayerStats:
+      type: object
+      required:
+        - user_id
+        - username
+        - wins
+      properties:
+        user_id:
+          type: integer
+          description: Discord user ID
+          example: 123456789012345678
+        username:
+          type: string
+          description: Discord username
+          example: "player123"
+        wins:
+          type: integer
+          description: Number of wins for this player
+          example: 5
+
+    BetInfo:
+      type: object
+      required:
+        - user_id
+        - username
+        - play_time
+        - bet_type
+        - game_date
+        - guild_id
+        - channel_id
+      properties:
+        user_id:
+          type: integer
+          description: Discord user ID
+          example: 123456789012345678
+        username:
+          type: string
+          description: Discord username
+          example: "player123"
+        play_time:
+          type: string
+          format: date-time
+          description: Time the bet was placed
+          example: "2024-01-15T13:37:00.123Z"
+        bet_type:
+          type: string
+          enum: [regular, early_bird]
+          description: Type of bet
+          example: "regular"
+        game_date:
+          type: string
+          format: date
+          description: Date of the game
+          example: "2024-01-15"
+        guild_id:
+          type: integer
+          description: Discord guild ID
+          example: 987654321098765432
+        channel_id:
+          type: integer
+          description: Discord channel ID
+          example: 111222333444555666
+
+    EmbedData:
+      type: object
+      required:
+        - title
+        - color
+        - fields
+      properties:
+        title:
+          type: string
+          description: Title of the Discord embed
+          example: "1337 Game Statistics"
+        color:
+          type: integer
+          description: Color of the Discord embed (as integer)
+          example: 3447003
+        fields:
+          type: array
+          description: Array of embed fields
+          items:
+            type: object
+            required:
+              - name
+              - value
+              - inline
+            properties:
+              name:
+                type: string
+                description: Field name
+                example: "Current Leader"
+              value:
+                type: string
+                description: Field value
+                example: "player123 (5 wins)"
+              inline:
+                type: boolean
+                description: Whether field should be inline
+                example: true
+        footer_text:
+          type: string
+          nullable: true
+          description: Footer text for the embed
+          example: "Updated daily at 13:37"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error type or code
+          example: "VALIDATION_ERROR"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Invalid bet request: user already has a bet for today"
+        details:
+          type: object
+          nullable: true
+          description: Additional error details
+          example: null
