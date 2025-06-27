@@ -146,8 +146,8 @@ class DatabaseManager:
 
     def get_todays_greetings(self, guild_id: Optional[int] = None) -> List[GreetingRecord]:
         """
-        Fetch all greetings for the given guild from the start of today until now,
-        ordered by greeting_time ascending, with reaction counts.
+        Fetch the latest greeting per user for the given guild from today,
+        ordered by greeting_time ascending, with reaction counts (excluding poster's own reactions).
         """
         connection = None
         try:
@@ -159,20 +159,36 @@ class DatabaseManager:
                 cursor.execute("""
                     SELECT g.username, g.greeting_time, COUNT(gr.id) as reaction_count
                     FROM greetings g
-                    LEFT JOIN greeting_reactions gr ON g.id = gr.greeting_id AND gr.reaction_date = g.greeting_date
+                    INNER JOIN (
+                        SELECT user_id, MAX(greeting_time) as max_time
+                        FROM greetings
+                        WHERE server_id = ? AND greeting_date = ?
+                        GROUP BY user_id
+                    ) latest ON g.user_id = latest.user_id AND g.greeting_time = latest.max_time
+                    LEFT JOIN greeting_reactions gr ON g.id = gr.greeting_id 
+                                                    AND gr.reaction_date = ?
+                                                    AND gr.user_id != g.user_id
                     WHERE g.server_id = ? AND g.greeting_date = ?
                     GROUP BY g.id, g.username, g.greeting_time
                     ORDER BY g.greeting_time ASC
-                """, (guild_id, today))
+                """, (guild_id, today, today, guild_id, today))
             else:
                 cursor.execute("""
                     SELECT g.username, g.greeting_time, COUNT(gr.id) as reaction_count
                     FROM greetings g
-                    LEFT JOIN greeting_reactions gr ON g.id = gr.greeting_id AND gr.reaction_date = g.greeting_date
+                    INNER JOIN (
+                        SELECT user_id, MAX(greeting_time) as max_time
+                        FROM greetings
+                        WHERE greeting_date = ?
+                        GROUP BY user_id
+                    ) latest ON g.user_id = latest.user_id AND g.greeting_time = latest.max_time
+                    LEFT JOIN greeting_reactions gr ON g.id = gr.greeting_id 
+                                                    AND gr.reaction_date = ?
+                                                    AND gr.user_id != g.user_id
                     WHERE g.greeting_date = ?
                     GROUP BY g.id, g.username, g.greeting_time
                     ORDER BY g.greeting_time ASC
-                """, (today,))
+                """, (today, today, today))
             
             results = cursor.fetchall()
             return [

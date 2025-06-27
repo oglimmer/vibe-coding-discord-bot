@@ -41,36 +41,22 @@ class GreetingsCommand(commands.Cog):
                 embed.description = "No one has greeted today yet! Be the first to say good morning! 🌅"
                 embed.color = discord.Color.orange()
             else:
-                # Group by user and sum reaction counts
-                user_reactions = {}
-                latest_times = {}
-                total_reactions = 0
+                # Each record now represents one user's latest greeting with reaction count
+                total_reactions = sum(g.reaction_count for g in greetings)
                 
-                for g in greetings:
-                    name = g.username
-                    if name not in user_reactions:
-                        user_reactions[name] = 0
-                        latest_times[name] = g.greeting_time
-                    
-                    user_reactions[name] += g.reaction_count
-                    total_reactions += g.reaction_count
-                    
-                    # Update latest time
-                    if g.greeting_time > latest_times[name]:
-                        latest_times[name] = g.greeting_time
-
                 # Sort by reaction count (descending)
-                sorted_users = sorted(user_reactions.items(), key=lambda x: x[1], reverse=True)
+                sorted_greetings = sorted(greetings, key=lambda x: x.reaction_count, reverse=True)
                 lines = []
-                for i, (user, reaction_count) in enumerate(sorted_users, 1):
-                    time_str = self.format_time(latest_times[user])
-                    reaction_emoji = "🔥" if reaction_count > 5 else "👍" if reaction_count > 2 else "👋"
-                    lines.append(f"{i}. **{user}** - {reaction_count} reactions {reaction_emoji} (latest: {time_str})")
+                for i, g in enumerate(sorted_greetings, 1):
+                    time_str = self.format_time(g.greeting_time)
+                    reaction_emoji = "🔥" if g.reaction_count > 5 else "👍" if g.reaction_count > 2 else "👋"
+                    lines.append(f"{i}. **{g.username}** - {g.reaction_count} reactions {reaction_emoji} (latest: {time_str})")
 
                 embed.description = "\n".join(lines)
                 embed.add_field(name="Total Reactions Today", value=str(total_reactions), inline=True)
-                embed.add_field(name="Unique Greeters", value=str(len(user_reactions)), inline=True)
+                embed.add_field(name="Unique Greeters", value=str(len(greetings)), inline=True)
 
+                # Find first and last by time (greetings are ordered by time ascending)
                 first = greetings[0]
                 last = greetings[-1]
                 embed.add_field(name="First Greeting", value=f"{first.username} at {self.format_time(first.greeting_time)}", inline=True)
