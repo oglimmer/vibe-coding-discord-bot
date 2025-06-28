@@ -643,6 +643,342 @@ class TestGame1337Logic(unittest.TestCase):
         expected = (23 * 3600 + 59 * 60 + 59) * 1000 + 999
         self.assertEqual(ms, expected)
 
+    # Role Assignment Tests
+    def test_determine_new_role_assignments_general_basic(self):
+        """Test General assignment - basic case where top player is not already General"""
+        winner_today = {'user_id': 123, 'username': 'Winner'}
+        current_roles = {'general': {'user_id': 999}, 'commander': {}, 'sergeant': {}}
+        
+        # Mock top players - player 456 has more wins than player 789
+        top_365_players = [
+            {'user_id': 456, 'username': 'TopPlayer', 'wins': 10},
+            {'user_id': 789, 'username': 'SecondPlace', 'wins': 8}
+        ]
+        top_14_players = [{'user_id': 456, 'username': 'TopPlayer', 'wins': 5}]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else top_14_players)
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        self.assertEqual(assignments['general'], 456)
+
+    def test_determine_new_role_assignments_general_already_general(self):
+        """Test General assignment - top player is already General, no change"""
+        winner_today = {'user_id': 123, 'username': 'Winner'}
+        current_roles = {'general': {'user_id': 456}, 'commander': {}, 'sergeant': {}}
+        
+        top_365_players = [
+            {'user_id': 456, 'username': 'CurrentGeneral', 'wins': 10},
+            {'user_id': 789, 'username': 'SecondPlace', 'wins': 8}
+        ]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else [])
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # No General should be assigned since top player is already General
+        self.assertNotIn('general', assignments)
+
+    def test_determine_new_role_assignments_general_tied_wins(self):
+        """Test General assignment - top two players have same wins, no General assigned"""
+        winner_today = {'user_id': 123, 'username': 'Winner'}
+        current_roles = {'general': {'user_id': 999}, 'commander': {}, 'sergeant': {}}
+        
+        # Both players have same number of wins
+        top_365_players = [
+            {'user_id': 456, 'username': 'Player1', 'wins': 10},
+            {'user_id': 789, 'username': 'Player2', 'wins': 10}
+        ]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else [])
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # No General should be assigned since top player doesn't have MORE wins
+        self.assertNotIn('general', assignments)
+
+    def test_determine_new_role_assignments_general_single_player(self):
+        """Test General assignment - only one player with wins"""
+        winner_today = {'user_id': 123, 'username': 'Winner'}
+        current_roles = {'general': {'user_id': 999}, 'commander': {}, 'sergeant': {}}
+        
+        top_365_players = [{'user_id': 456, 'username': 'OnlyPlayer', 'wins': 5}]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else [])
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        self.assertEqual(assignments['general'], 456)
+
+    def test_determine_new_role_assignments_commander_basic(self):
+        """Test Commander assignment - basic case"""
+        winner_today = {'user_id': 123, 'username': 'Winner'}
+        current_roles = {'general': {'user_id': 456}, 'commander': {'user_id': 999}, 'sergeant': {}}
+        
+        top_365_players = [{'user_id': 456, 'username': 'General', 'wins': 20}]
+        top_14_players = [
+            {'user_id': 789, 'username': 'Commander', 'wins': 8},
+            {'user_id': 321, 'username': 'ThirdPlace', 'wins': 6}
+        ]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else top_14_players)
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # Player 789 should become Commander (not General, has more wins than 3rd place, not already Commander)
+        self.assertEqual(assignments['commander'], 789)
+
+    def test_determine_new_role_assignments_commander_already_commander(self):
+        """Test Commander assignment - top 14-day player is already Commander"""
+        winner_today = {'user_id': 123, 'username': 'Winner'}
+        current_roles = {'general': {'user_id': 456}, 'commander': {'user_id': 789}, 'sergeant': {}}
+        
+        top_365_players = [{'user_id': 456, 'username': 'General', 'wins': 20}]
+        top_14_players = [
+            {'user_id': 789, 'username': 'CurrentCommander', 'wins': 8},
+            {'user_id': 321, 'username': 'SecondPlace', 'wins': 6}
+        ]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else top_14_players)
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # No Commander should be assigned since top player is already Commander
+        # and second place doesn't have MORE wins than anyone else
+        self.assertNotIn('commander', assignments)
+
+    def test_determine_new_role_assignments_commander_general_leads_14day(self):
+        """Test Commander assignment - General also leads 14-day stats, pick second place"""
+        winner_today = {'user_id': 123, 'username': 'Winner'}
+        current_roles = {'general': {'user_id': 456}, 'commander': {'user_id': 999}, 'sergeant': {}}
+        
+        top_365_players = [{'user_id': 456, 'username': 'General', 'wins': 20}]
+        # General (456) also leads 14-day stats
+        top_14_players = [
+            {'user_id': 456, 'username': 'General', 'wins': 8},
+            {'user_id': 789, 'username': 'SecondPlace', 'wins': 6},
+            {'user_id': 321, 'username': 'ThirdPlace', 'wins': 4}
+        ]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else top_14_players)
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # Second place should become Commander since General leads both stats
+        self.assertEqual(assignments['commander'], 789)
+
+    def test_determine_new_role_assignments_commander_tied_14day_wins(self):
+        """Test Commander assignment - top 14-day players have tied wins"""
+        winner_today = {'user_id': 123, 'username': 'Winner'}
+        current_roles = {'general': {'user_id': 456}, 'commander': {'user_id': 999}, 'sergeant': {}}
+        
+        top_365_players = [{'user_id': 456, 'username': 'General', 'wins': 20}]
+        # Top two 14-day players have same wins
+        top_14_players = [
+            {'user_id': 789, 'username': 'Player1', 'wins': 8},
+            {'user_id': 321, 'username': 'Player2', 'wins': 8}
+        ]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else top_14_players)
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # No Commander should be assigned since top player doesn't have MORE wins
+        self.assertNotIn('commander', assignments)
+
+    def test_determine_new_role_assignments_commander_single_14day_player(self):
+        """Test Commander assignment - only one 14-day player"""
+        winner_today = {'user_id': 123, 'username': 'Winner'}
+        current_roles = {'general': {'user_id': 456}, 'commander': {'user_id': 999}, 'sergeant': {}}
+        
+        top_365_players = [{'user_id': 456, 'username': 'General', 'wins': 20}]
+        top_14_players = [{'user_id': 789, 'username': 'OnlyPlayer', 'wins': 5}]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else top_14_players)
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        self.assertEqual(assignments['commander'], 789)
+
+    def test_determine_new_role_assignments_sergeant_basic(self):
+        """Test Sergeant assignment - basic case"""
+        winner_today = {'user_id': 123, 'username': 'Winner'}
+        current_roles = {'general': {'user_id': 456}, 'commander': {'user_id': 789}, 'sergeant': {}}
+        
+        top_365_players = [{'user_id': 456, 'username': 'General', 'wins': 20}]
+        top_14_players = [{'user_id': 789, 'username': 'Commander', 'wins': 8}]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else top_14_players)
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # Winner should become Sergeant since they're not General or Commander
+        self.assertEqual(assignments['sergeant'], 123)
+
+    def test_determine_new_role_assignments_sergeant_winner_is_general(self):
+        """Test Sergeant assignment - winner is General, no Sergeant assigned"""
+        winner_today = {'user_id': 456, 'username': 'WinnerGeneral'}
+        current_roles = {'general': {'user_id': 999}, 'commander': {'user_id': 789}, 'sergeant': {}}
+        
+        top_365_players = [
+            {'user_id': 456, 'username': 'WinnerGeneral', 'wins': 20},
+            {'user_id': 321, 'username': 'SecondPlace', 'wins': 15}
+        ]
+        top_14_players = [{'user_id': 789, 'username': 'Commander', 'wins': 8}]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else top_14_players)
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # Winner becomes General, no Sergeant assigned
+        self.assertEqual(assignments['general'], 456)
+        self.assertNotIn('sergeant', assignments)
+
+    def test_determine_new_role_assignments_sergeant_winner_is_commander(self):
+        """Test Sergeant assignment - winner is Commander, no Sergeant assigned"""
+        winner_today = {'user_id': 789, 'username': 'WinnerCommander'}
+        current_roles = {'general': {'user_id': 456}, 'commander': {'user_id': 999}, 'sergeant': {}}
+        
+        top_365_players = [{'user_id': 456, 'username': 'General', 'wins': 20}]
+        top_14_players = [
+            {'user_id': 789, 'username': 'WinnerCommander', 'wins': 8},
+            {'user_id': 321, 'username': 'SecondPlace', 'wins': 6}
+        ]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else top_14_players)
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # Winner becomes Commander, no Sergeant assigned
+        self.assertEqual(assignments['commander'], 789)
+        self.assertNotIn('sergeant', assignments)
+
+    def test_determine_new_role_assignments_complex_scenario(self):
+        """Test complex scenario with multiple role changes"""
+        winner_today = {'user_id': 123, 'username': 'DailyWinner'}
+        current_roles = {
+            'general': {'user_id': 999, 'username': 'OldGeneral'}, 
+            'commander': {'user_id': 888, 'username': 'OldCommander'}, 
+            'sergeant': {'user_id': 777, 'username': 'OldSergeant'}
+        }
+        
+        # New top 365-day player
+        top_365_players = [
+            {'user_id': 456, 'username': 'NewGeneral', 'wins': 25},
+            {'user_id': 999, 'username': 'OldGeneral', 'wins': 20}
+        ]
+        # New top 14-day player who is different from General
+        top_14_players = [
+            {'user_id': 789, 'username': 'NewCommander', 'wins': 10},
+            {'user_id': 456, 'username': 'NewGeneral', 'wins': 8}
+        ]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else top_14_players)
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # All roles should change
+        self.assertEqual(assignments['general'], 456)      # New General
+        self.assertEqual(assignments['commander'], 789)    # New Commander  
+        self.assertEqual(assignments['sergeant'], 123)     # Daily winner becomes Sergeant
+
+    def test_determine_new_role_assignments_no_stats_available(self):
+        """Test when no statistics are available"""
+        winner_today = {'user_id': 123, 'username': 'Winner'}
+        current_roles = {'general': {}, 'commander': {}, 'sergeant': {}}
+        
+        # No players in statistics
+        self.logic.get_winner_stats = Mock(return_value=[])
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # Only Sergeant should be assigned to the daily winner
+        self.assertEqual(assignments['sergeant'], 123)
+        self.assertNotIn('general', assignments)
+        self.assertNotIn('commander', assignments)
+
+    def test_determine_new_role_assignments_empty_current_roles(self):
+        """Test with empty current roles structure"""
+        winner_today = {'user_id': 123, 'username': 'Winner'}
+        current_roles = {}  # Empty dict
+        
+        top_365_players = [
+            {'user_id': 456, 'username': 'TopPlayer', 'wins': 10},
+            {'user_id': 789, 'username': 'SecondPlace', 'wins': 8}
+        ]
+        top_14_players = [
+            {'user_id': 456, 'username': 'TopPlayer', 'wins': 5},
+            {'user_id': 321, 'username': 'Commander', 'wins': 3}
+        ]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else top_14_players)
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # Should assign roles properly
+        self.assertEqual(assignments['general'], 456)      # Top 365-day player
+        self.assertEqual(assignments['commander'], 321)    # Second place 14-day player (since General leads both)
+        self.assertEqual(assignments['sergeant'], 123)     # Daily winner
+
+    def test_determine_new_role_assignments_winner_dominates_all_stats(self):
+        """Test when daily winner dominates all statistics"""
+        winner_today = {'user_id': 456, 'username': 'Dominator'}
+        current_roles = {'general': {'user_id': 999}, 'commander': {'user_id': 888}, 'sergeant': {'user_id': 777}}
+        
+        # Winner is top in both 365-day and 14-day stats
+        top_365_players = [
+            {'user_id': 456, 'username': 'Dominator', 'wins': 30},
+            {'user_id': 789, 'username': 'SecondPlace', 'wins': 20}
+        ]
+        top_14_players = [
+            {'user_id': 456, 'username': 'Dominator', 'wins': 15},
+            {'user_id': 321, 'username': 'SecondPlace14', 'wins': 10}
+        ]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else top_14_players)
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # Winner should become General, second place 14-day should become Commander
+        self.assertEqual(assignments['general'], 456)
+        self.assertEqual(assignments['commander'], 321)  # Second place in 14-day stats
+        self.assertNotIn('sergeant', assignments)  # Winner can't be Sergeant if they're General
+
+    def test_determine_new_role_assignments_general_special_case_only_two_14day_players(self):
+        """Test special case: General leads 14-day but only 2 players exist"""
+        winner_today = {'user_id': 123, 'username': 'Winner'}
+        current_roles = {'general': {'user_id': 456}, 'commander': {'user_id': 999}, 'sergeant': {}}
+        
+        top_365_players = [{'user_id': 456, 'username': 'General', 'wins': 20}]
+        # General leads 14-day stats, only 2 players total
+        top_14_players = [
+            {'user_id': 456, 'username': 'General', 'wins': 8},
+            {'user_id': 789, 'username': 'SecondPlace', 'wins': 6}
+        ]
+        
+        self.logic.get_winner_stats = Mock(side_effect=lambda days: 
+            top_365_players if days == 365 else top_14_players)
+        
+        assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
+        
+        # Second place should become Commander even with only 2 players
+        self.assertEqual(assignments['commander'], 789)
+
 
 if __name__ == '__main__':
     unittest.main()
