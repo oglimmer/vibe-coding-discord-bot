@@ -129,6 +129,7 @@ class Game1337Command(commands.Cog):
         
         if not winner_result:
             logger.info(f"No winner for {game_date}")
+            await self._announce_no_winner()
             return
             
         if winner_result.get('catastrophic_event'):
@@ -171,6 +172,30 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
                 if channel.permissions_for(guild.me).send_messages:
                     await channel.send(message)
                     break
+
+    async def _announce_no_winner(self):
+        """Announce that there was no winner for today's game"""
+        message = "📅 **No winner today!** 🤷‍♂️"
+        
+        for guild in self.bot.guilds:
+            try:
+                # Try configured announcement channel first
+                if Config.ANNOUNCEMENT_CHANNEL_ID:
+                    announcement_channel = guild.get_channel(Config.ANNOUNCEMENT_CHANNEL_ID)
+                    if announcement_channel and announcement_channel.permissions_for(guild.me).send_messages:
+                        await announcement_channel.send(message)
+                        logger.info(f"No winner announced in configured channel: {announcement_channel.name} (Guild: {guild.name})")
+                        continue
+                
+                # Fallback to first available text channel
+                for channel in guild.text_channels:
+                    if channel.permissions_for(guild.me).send_messages:
+                        await channel.send(message)
+                        logger.info(f"No winner announced in fallback channel: {channel.name} (Guild: {guild.name})")
+                        break
+                        
+            except Exception as e:
+                logger.error(f"Error sending no winner announcement in guild {guild.id}: {e}")
 
     async def _update_roles(self):
         """Update Discord roles based on winner statistics"""
