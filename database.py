@@ -903,7 +903,7 @@ class DatabaseManager:
                         target_user_id, 
                         target_username as username
                     FROM factcheck_requests
-                    WHERE request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    WHERE request_date >= DATE_SUB(CURDATE(), INTERVAL {days} DAY)
                     GROUP BY target_user_id
                     ORDER BY MAX(created_at) DESC
                 ) latest_username ON u.user_id = latest_username.target_user_id
@@ -912,7 +912,7 @@ class DatabaseManager:
                     AND target_checks.requester_user_id != target_checks.target_user_id  -- EXCLUDE self-checks!
                     AND target_checks.score IS NOT NULL
                     AND target_checks.is_factcheckable = TRUE  -- ONLY factcheckable messages count toward score!
-                    AND target_checks.request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    AND target_checks.request_date >= DATE_SUB(CURDATE(), INTERVAL {days} DAY)
                 LEFT JOIN (
                     -- Self-checks separately
                     SELECT 
@@ -920,7 +920,7 @@ class DatabaseManager:
                         COUNT(*) as self_check_count
                     FROM factcheck_requests 
                     WHERE requester_user_id = target_user_id  -- Self-check
-                        AND request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                        AND request_date >= DATE_SUB(CURDATE(), INTERVAL {days} DAY)
                     GROUP BY target_user_id
                 ) self_checks ON u.user_id = self_checks.target_user_id
                 LEFT JOIN (
@@ -929,7 +929,7 @@ class DatabaseManager:
                         requester_user_id,
                         COUNT(*) as total_requests
                     FROM factcheck_requests 
-                    WHERE request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    WHERE request_date >= DATE_SUB(CURDATE(), INTERVAL {days} DAY)
                     GROUP BY requester_user_id
                 ) requester_stats ON u.user_id = requester_stats.requester_user_id
                 WHERE u.opted_in = TRUE
@@ -939,7 +939,7 @@ class DatabaseManager:
                 LIMIT ? OFFSET ?
             """
             
-            cursor.execute(query, (days, days, days, days, per_page, offset))
+            cursor.execute(query, (per_page, offset))
             
             results = cursor.fetchall()
             return [
