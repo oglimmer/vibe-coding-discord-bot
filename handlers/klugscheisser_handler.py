@@ -148,7 +148,9 @@ class KlugscheisserHandler:
         # Ensure the response isn't too long for Discord
         if len(response) > 2000:
             # Truncate and add indicator
-            response = response[:1990] + "... *(zu frech)*"
+            truncation_suffix = "... *(zu frech)*"
+            max_content_length = 2000 - len(truncation_suffix)
+            response = response[:max_content_length] + truncation_suffix
             
         return response
     
