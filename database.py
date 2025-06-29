@@ -936,10 +936,10 @@ class DatabaseManager:
                 GROUP BY u.user_id, latest_username.username, self_checks.self_check_count, requester_stats.total_requests
                 HAVING COUNT(target_checks.id) >= 3  -- Min. 3x checked by OTHERS
                 ORDER BY {order_clause}
-                LIMIT ? OFFSET ?
+                LIMIT {per_page} OFFSET {offset}
             """
             
-            cursor.execute(query, (per_page, offset))
+            cursor.execute(query)
             
             results = cursor.fetchall()
             return [
