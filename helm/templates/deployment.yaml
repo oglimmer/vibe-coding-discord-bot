@@ -57,6 +57,11 @@ spec:
                 secretKeyRef:
                   name: discord-bot-secrets
                   key: DB_PASSWORD
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: discord-bot-secrets
+                  key: OPENAI_API_KEY
       volumes:
         - name: tmp-logs
           emptyDir: {}

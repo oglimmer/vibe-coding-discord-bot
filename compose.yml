@@ -30,6 +30,7 @@ services:
       - GENERAL_ROLE_ID=${GENERAL_ROLE_ID}
       - ANNOUNCEMENT_CHANNEL_ID=${ANNOUNCEMENT_CHANNEL_ID}
       - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
         mariadb:
             condition: service_healthy
