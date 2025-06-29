@@ -168,6 +168,24 @@ class DatabaseManager:
                 )
             """)
             
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_response_cache (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    message_content_hash VARCHAR(64) NOT NULL,
+                    message_content TEXT NOT NULL,
+                    response_type ENUM('klugscheiss', 'factcheck') NOT NULL,
+                    ai_response TEXT NOT NULL,
+                    score TINYINT NULL,
+                    hit_count INT DEFAULT 1,
+                    first_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY unique_hash_type (message_content_hash, response_type),
+                    INDEX idx_hash (message_content_hash),
+                    INDEX idx_type (response_type),
+                    INDEX idx_last_used (last_used)
+                )
+            """)
+            
             # Migration: Add is_factcheckable column if it doesn't exist
             try:
                 cursor.execute("ALTER TABLE factcheck_requests ADD COLUMN is_factcheckable BOOLEAN DEFAULT TRUE")
@@ -1023,6 +1041,72 @@ class DatabaseManager:
         except mariadb.Error as e:
             logger.error(f"Error fetching user factcheck breakdown: {e}")
             return {}
+        finally:
+            if connection:
+                connection.close()
+
+    def get_ai_response_cache(self, message_content, response_type):
+        """
+        Returns cached AI response for exact message_content and response_type ('klugscheiss' or 'factcheck'), or None.
+        """
+        import hashlib
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            content_hash = hashlib.sha256(message_content.strip().encode("utf-8")).hexdigest()
+            cursor.execute("""
+                SELECT ai_response, score, hit_count FROM ai_response_cache
+                WHERE message_content_hash = ? AND response_type = ?
+                LIMIT 1
+            """, (content_hash, response_type))
+            row = cursor.fetchone()
+            if row:
+                # Update hit_count and last_used
+                cursor.execute("""
+                    UPDATE ai_response_cache
+                    SET hit_count = hit_count + 1, last_used = CURRENT_TIMESTAMP
+                    WHERE message_content_hash = ? AND response_type = ?
+                """, (content_hash, response_type))
+                connection.commit()
+                return {
+                    "ai_response": row[0],
+                    "score": row[1],
+                    "hit_count": row[2] + 1
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching ai_response_cache: {e}")
+            return None
+        finally:
+            if connection:
+                connection.close()
+
+    def save_ai_response_cache(self, message_content, response_type, ai_response, score=None):
+        """
+        Saves or updates the AI response cache for a given message_content and response_type.
+        """
+        import hashlib
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            content_hash = hashlib.sha256(message_content.strip().encode("utf-8")).hexdigest()
+            cursor.execute("""
+                INSERT INTO ai_response_cache (message_content_hash, message_content, response_type, ai_response, score, hit_count)
+                VALUES (?, ?, ?, ?, ?, 1)
+                ON DUPLICATE KEY UPDATE
+                    ai_response = VALUES(ai_response),
+                    score = VALUES(score),
+                    hit_count = hit_count + 1,
+                    last_used = CURRENT_TIMESTAMP
+            """, (content_hash, message_content, response_type, ai_response, score))
+            connection.commit()
+            logger.info(f"Saved AI response cache for type={response_type}, hash={content_hash[:8]}")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving ai_response_cache: {e}")
+            return False
         finally:
             if connection:
                 connection.close()

@@ -197,13 +197,15 @@ Antworte nur mit "JA" oder "NEIN".
             logger.error(f"Error in should_respond_with_klugscheiss: {e}")
             return False  # Default to no trolling on error
     
-    async def generate_klugscheiss_response(self, message_content: str, user_name: str = None) -> Optional[str]:
+    async def generate_klugscheiss_response(self, message_content: str, user_name: str = None, db_manager=None) -> Optional[str]:
         """
         Generate a humorous, troll-like klugscheißer response.
+        Checks the cache first, and saves the result to cache.
         
         Args:
             message_content: The message content to troll
             user_name: Optional username for context
+            db_manager: DatabaseManager instance for caching
             
         Returns:
             Troll response or None if service unavailable/error
@@ -211,7 +213,14 @@ Antworte nur mit "JA" oder "NEIN".
         if not self.is_available():
             logger.debug("OpenAI service not available")
             return None
-            
+
+        # 1. Check cache
+        if db_manager:
+            cached = db_manager.get_ai_response_cache(message_content, "klugscheiss")
+            if cached and cached.get("ai_response"):
+                logger.info("Returning klugscheiss response from cache")
+                return cached["ai_response"]
+
         try:
             prompt = f"""
 Du bist ein Internet-Troll-Klugscheißer namens "Vibe Bot" 🤓. Reagiere humorvoll-provokativ auf diese Nachricht:
@@ -264,6 +273,9 @@ Antworte nur mit dem Troll-Kommentar, keine Erklärungen.
                 content = response.choices[0].message.content
                 if content:
                     logger.info(f"Successfully generated klugscheiss response ({len(content)} chars)")
+                    # Save to cache
+                    if db_manager:
+                        db_manager.save_ai_response_cache(message_content, "klugscheiss", content.strip())
                     return content.strip()
             
             logger.warning("Empty response from OpenAI API")

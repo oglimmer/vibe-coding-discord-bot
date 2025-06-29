@@ -94,7 +94,8 @@ class KlugscheisserHandler:
             logger.info(f"Generating troll response for message from {message.author.display_name}")
             troll_response = await self.openai_service.generate_klugscheiss_response(
                 message_content=message.content,
-                user_name=message.author.display_name
+                user_name=message.author.display_name,
+                db_manager=self.db_manager
             )
             
             if not troll_response:
