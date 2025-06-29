@@ -7,3 +7,5 @@ bot.log
 lib/
 pyvenv.cfg
 .DS_Store
+
+venv/

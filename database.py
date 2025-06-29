@@ -135,6 +135,50 @@ class DatabaseManager:
                 )
             """)
             
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS klugscheisser_user_preferences (
+                    user_id BIGINT PRIMARY KEY,
+                    opted_in BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_opted_in (opted_in)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS factcheck_requests (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    requester_user_id BIGINT NOT NULL,
+                    requester_username VARCHAR(255) NOT NULL,
+                    target_message_id BIGINT NOT NULL,
+                    target_user_id BIGINT NOT NULL,
+                    target_username VARCHAR(255) NOT NULL,
+                    message_content TEXT NOT NULL,
+                    request_date DATE NOT NULL,
+                    score TINYINT CHECK (score >= 0 AND score <= 9),
+                    factcheck_response TEXT,
+                    is_factcheckable BOOLEAN DEFAULT TRUE,
+                    server_id BIGINT,
+                    channel_id BIGINT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_requester_date (requester_user_id, request_date),
+                    INDEX idx_target_message (target_message_id),
+                    INDEX idx_request_date (request_date),
+                    INDEX idx_factcheckable (is_factcheckable)
+                )
+            """)
+            
+            # Migration: Add is_factcheckable column if it doesn't exist
+            try:
+                cursor.execute("ALTER TABLE factcheck_requests ADD COLUMN is_factcheckable BOOLEAN DEFAULT TRUE")
+                cursor.execute("ALTER TABLE factcheck_requests ADD INDEX idx_factcheckable (is_factcheckable)")
+                logger.info("Added is_factcheckable column to factcheck_requests table")
+            except mariadb.Error as e:
+                if "Duplicate column name" in str(e):
+                    logger.info("is_factcheckable column already exists in factcheck_requests table")
+                else:
+                    logger.warning(f"Could not add is_factcheckable column: {e}")
+            
             connection.commit()
             logger.info("Database tables created successfully")
         except mariadb.Error as e:
@@ -589,6 +633,396 @@ class DatabaseManager:
         except mariadb.Error as e:
             logger.error(f"Error removing role assignment: {e}")
             return False
+        finally:
+            if connection:
+                connection.close()
+
+    def set_klugscheisser_preference(self, user_id, opted_in):
+        """Set or update user's klugscheißer opt-in preference"""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute("""
+                INSERT INTO klugscheisser_user_preferences (user_id, opted_in)
+                VALUES (?, ?)
+                ON DUPLICATE KEY UPDATE
+                opted_in = VALUES(opted_in),
+                updated_at = CURRENT_TIMESTAMP
+            """, (user_id, opted_in))
+            
+            connection.commit()
+            status = "opted in" if opted_in else "opted out"
+            logger.info(f"User {user_id} {status} of klugscheißer feature")
+            return True
+        except mariadb.Error as e:
+            logger.error(f"Error setting klugscheißer preference: {e}")
+            return False
+        finally:
+            if connection:
+                connection.close()
+    
+    def get_klugscheisser_preference(self, user_id):
+        """Get user's klugscheißer opt-in preference (default: False)"""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute("""
+                SELECT opted_in, created_at
+                FROM klugscheisser_user_preferences 
+                WHERE user_id = ?
+            """, (user_id,))
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'opted_in': bool(result[0]),
+                    'created_at': result[1]
+                }
+            return {'opted_in': False, 'created_at': None}
+        except mariadb.Error as e:
+            logger.error(f"Error fetching klugscheißer preference: {e}")
+            return {'opted_in': False, 'created_at': None}
+        finally:
+            if connection:
+                connection.close()
+    
+    def get_opted_in_users_count(self):
+        """Get count of users who have opted in to klugscheißer"""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM klugscheisser_user_preferences 
+                WHERE opted_in = TRUE
+            """)
+            
+            result = cursor.fetchone()
+            return result[0] if result else 0
+        except mariadb.Error as e:
+            logger.error(f"Error fetching opted in users count: {e}")
+            return 0
+        finally:
+            if connection:
+                connection.close()
+
+    def save_factcheck_request(self, requester_user_id, requester_username, target_message_id, 
+                              target_user_id, target_username, message_content, score=None, 
+                              factcheck_response=None, is_factcheckable=True, server_id=None, channel_id=None):
+        """Save a fact-check request to the database"""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            today = datetime.now().date()
+            
+            cursor.execute("""
+                INSERT INTO factcheck_requests (
+                    requester_user_id, requester_username, target_message_id, 
+                    target_user_id, target_username, message_content, request_date,
+                    score, factcheck_response, is_factcheckable, server_id, channel_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (requester_user_id, requester_username, target_message_id, 
+                  target_user_id, target_username, message_content, today,
+                  score, factcheck_response, is_factcheckable, server_id, channel_id))
+            
+            factcheck_id = cursor.lastrowid
+            connection.commit()
+            logger.info(f"Saved factcheck request from {requester_username} ({requester_user_id}) with ID {factcheck_id}, factcheckable: {is_factcheckable}")
+            return factcheck_id
+        except mariadb.Error as e:
+            logger.error(f"Error saving factcheck request: {e}")
+            return None
+        finally:
+            if connection:
+                connection.close()
+    
+    def get_daily_factcheck_count(self, user_id, date=None):
+        """Get the number of fact-check requests made by a user on a specific date"""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            if date is None:
+                date = datetime.now().date()
+            
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM factcheck_requests 
+                WHERE requester_user_id = ? AND request_date = ?
+            """, (user_id, date))
+            
+            result = cursor.fetchone()
+            return result[0] if result else 0
+        except mariadb.Error as e:
+            logger.error(f"Error fetching daily factcheck count: {e}")
+            return 0
+        finally:
+            if connection:
+                connection.close()
+    
+    def update_factcheck_result(self, factcheck_id, score, factcheck_response):
+        """Update a fact-check request with the result and score"""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute("""
+                UPDATE factcheck_requests 
+                SET score = ?, factcheck_response = ?
+                WHERE id = ?
+            """, (score, factcheck_response, factcheck_id))
+            
+            connection.commit()
+            logger.info(f"Updated factcheck request {factcheck_id} with score {score}")
+            return True
+        except mariadb.Error as e:
+            logger.error(f"Error updating factcheck result: {e}")
+            return False
+        finally:
+            if connection:
+                connection.close()
+    
+    def get_factcheck_statistics(self, user_id=None, days=30):
+        """Get fact-check statistics for a user or all users"""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            
+            if user_id:
+                cursor.execute("""
+                    SELECT COUNT(*) as total_requests,
+                           AVG(score) as avg_score,
+                           MIN(score) as min_score,
+                           MAX(score) as max_score
+                    FROM factcheck_requests 
+                    WHERE requester_user_id = ? 
+                      AND request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                      AND score IS NOT NULL
+                """, (user_id, days))
+                
+                result = cursor.fetchone()
+                if result:
+                    return {
+                        'total_requests': result[0],
+                        'avg_score': float(result[1]) if result[1] else 0,
+                        'min_score': result[2],
+                        'max_score': result[3]
+                    }
+            else:
+                cursor.execute("""
+                    SELECT requester_user_id, requester_username,
+                           COUNT(*) as total_requests,
+                           AVG(score) as avg_score
+                    FROM factcheck_requests 
+                    WHERE request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                      AND score IS NOT NULL
+                    GROUP BY requester_user_id, requester_username
+                    ORDER BY total_requests DESC
+                """, (days,))
+                
+                results = cursor.fetchall()
+                return [
+                    {
+                        'user_id': row[0],
+                        'username': row[1],
+                        'total_requests': row[2],
+                        'avg_score': float(row[3]) if row[3] else 0
+                    }
+                    for row in results
+                ]
+            
+            return {} if user_id else []
+        except mariadb.Error as e:
+            logger.error(f"Error fetching factcheck statistics: {e}")
+            return {} if user_id else []
+        finally:
+            if connection:
+                connection.close()
+
+    def get_bullshit_board_data(self, page=0, per_page=10, days=30, sort_by="score_asc"):
+        """Get comprehensive bullshit board data with anti-cheat (excludes self-checks from score)"""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            
+            # Sort options
+            sort_options = {
+                "score_asc": "avg_score ASC, times_checked_by_others DESC",
+                "checked_desc": "times_checked_by_others DESC, avg_score ASC",
+                "activity_desc": "total_activity DESC, avg_score ASC",
+                "requests_desc": "total_requests DESC, avg_score ASC"
+            }
+            order_clause = sort_options.get(sort_by, sort_options["score_asc"])
+            
+            offset = page * per_page
+            
+            query = f"""
+                SELECT 
+                    u.user_id,
+                    COALESCE(latest_username.username, 'Unknown') as username,
+                    -- Score only from OTHER users (prevents self-manipulation)
+                    COALESCE(AVG(target_checks.score), 0) as avg_score,
+                    COUNT(target_checks.id) as times_checked_by_others,
+                    -- Self-checks separately (don't count toward score)
+                    COALESCE(self_checks.self_check_count, 0) as self_checks,
+                    -- All requests (including self-checks)
+                    COALESCE(requester_stats.total_requests, 0) as total_requests,
+                    -- Total activity
+                    (COUNT(target_checks.id) + COALESCE(self_checks.self_check_count, 0) + COALESCE(requester_stats.total_requests, 0)) as total_activity,
+                    -- Worst single score (from others only)
+                    COALESCE(MIN(target_checks.score), 0) as worst_score
+                FROM klugscheisser_user_preferences u
+                LEFT JOIN (
+                    -- Get latest username for each user
+                    SELECT 
+                        target_user_id, 
+                        target_username as username
+                    FROM factcheck_requests
+                    WHERE request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    GROUP BY target_user_id
+                    ORDER BY MAX(created_at) DESC
+                ) latest_username ON u.user_id = latest_username.target_user_id
+                LEFT JOIN factcheck_requests target_checks 
+                    ON u.user_id = target_checks.target_user_id 
+                    AND target_checks.requester_user_id != target_checks.target_user_id  -- EXCLUDE self-checks!
+                    AND target_checks.score IS NOT NULL
+                    AND target_checks.is_factcheckable = TRUE  -- ONLY factcheckable messages count toward score!
+                    AND target_checks.request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                LEFT JOIN (
+                    -- Self-checks separately
+                    SELECT 
+                        target_user_id,
+                        COUNT(*) as self_check_count
+                    FROM factcheck_requests 
+                    WHERE requester_user_id = target_user_id  -- Self-check
+                        AND request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    GROUP BY target_user_id
+                ) self_checks ON u.user_id = self_checks.target_user_id
+                LEFT JOIN (
+                    -- All requests
+                    SELECT 
+                        requester_user_id,
+                        COUNT(*) as total_requests
+                    FROM factcheck_requests 
+                    WHERE request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    GROUP BY requester_user_id
+                ) requester_stats ON u.user_id = requester_stats.requester_user_id
+                WHERE u.opted_in = TRUE
+                GROUP BY u.user_id, latest_username.username, self_checks.self_check_count, requester_stats.total_requests
+                HAVING COUNT(target_checks.id) >= 3  -- Min. 3x checked by OTHERS
+                ORDER BY {order_clause}
+                LIMIT ? OFFSET ?
+            """
+            
+            cursor.execute(query, (days, days, days, days, per_page, offset))
+            
+            results = cursor.fetchall()
+            return [
+                {
+                    'user_id': row[0],
+                    'username': row[1],
+                    'avg_score': float(row[2]) if row[2] else 0.0,
+                    'times_checked_by_others': row[3],
+                    'self_checks': row[4],
+                    'total_requests': row[5],
+                    'total_activity': row[6],
+                    'worst_score': row[7]
+                }
+                for row in results
+            ]
+        except mariadb.Error as e:
+            logger.error(f"Error fetching bullshit board data: {e}")
+            return []
+        finally:
+            if connection:
+                connection.close()
+    
+    def get_bullshit_board_count(self, days=30):
+        """Get total count of users eligible for bullshit board"""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            
+            cursor.execute("""
+                SELECT COUNT(DISTINCT u.user_id)
+                FROM klugscheisser_user_preferences u
+                JOIN factcheck_requests target_checks 
+                    ON u.user_id = target_checks.target_user_id 
+                    AND target_checks.requester_user_id != target_checks.target_user_id  -- EXCLUDE self-checks!
+                    AND target_checks.score IS NOT NULL
+                    AND target_checks.request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                WHERE u.opted_in = TRUE
+                GROUP BY u.user_id
+                HAVING COUNT(target_checks.id) >= 3  -- Min. 3x checked by OTHERS
+            """, (days,))
+            
+            result = cursor.fetchone()
+            return result[0] if result else 0
+        except mariadb.Error as e:
+            logger.error(f"Error fetching bullshit board count: {e}")
+            return 0
+        finally:
+            if connection:
+                connection.close()
+    
+    def get_user_factcheck_breakdown(self, user_id, days=30):
+        """Get detailed breakdown of user's factcheck activity"""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            
+            cursor.execute("""
+                SELECT 
+                    -- Checks by others (counts toward score)
+                    COUNT(CASE WHEN fcr.requester_user_id != fcr.target_user_id THEN 1 END) as checked_by_others,
+                    AVG(CASE WHEN fcr.requester_user_id != fcr.target_user_id THEN fcr.score END) as score_from_others,
+                    MIN(CASE WHEN fcr.requester_user_id != fcr.target_user_id THEN fcr.score END) as worst_from_others,
+                    -- Self-checks (don't count toward score)
+                    COUNT(CASE WHEN fcr.requester_user_id = fcr.target_user_id THEN 1 END) as self_checks,
+                    AVG(CASE WHEN fcr.requester_user_id = fcr.target_user_id THEN fcr.score END) as score_from_self,
+                    -- Requests made
+                    (SELECT COUNT(*) FROM factcheck_requests 
+                     WHERE requester_user_id = ? 
+                       AND request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)) as total_requests,
+                    -- Unique checkers
+                    COUNT(DISTINCT CASE WHEN fcr.requester_user_id != fcr.target_user_id 
+                                       THEN fcr.requester_user_id END) as unique_checkers
+                FROM factcheck_requests fcr
+                WHERE fcr.target_user_id = ? 
+                  AND fcr.score IS NOT NULL
+                  AND fcr.request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+            """, (user_id, days, user_id, days))
+            
+            result = cursor.fetchone()
+            if result:
+                checked_by_others = result[0] or 0
+                self_checks = result[4] or 0
+                total_checks = checked_by_others + self_checks
+                
+                return {
+                    'checked_by_others': checked_by_others,
+                    'score_from_others': float(result[1]) if result[1] else 0.0,
+                    'worst_from_others': result[2],
+                    'self_checks': self_checks,
+                    'score_from_self': float(result[4]) if result[4] else 0.0,
+                    'total_requests': result[5] or 0,
+                    'unique_checkers': result[6] or 0,
+                    'self_check_ratio': (self_checks / total_checks) if total_checks > 0 else 0.0,
+                    'legitimacy_flag': 'SUSPICIOUS' if (self_checks / total_checks) > 0.3 and total_checks >= 5 else 'CLEAN'
+                }
+            return {}
+        except mariadb.Error as e:
+            logger.error(f"Error fetching user factcheck breakdown: {e}")
+            return {}
         finally:
             if connection:
                 connection.close()

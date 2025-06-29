@@ -1,12 +1,14 @@
 import logging
 import re
 from database import DatabaseManager
+from handlers.klugscheisser_handler import KlugscheisserHandler
 
 logger = logging.getLogger(__name__)
 
 class MessageHandler:
     def __init__(self, db_manager: DatabaseManager):
         self.db_manager = db_manager
+        self.klugscheisser_handler = KlugscheisserHandler(db_manager)
 
         # English greetings
         english_greetings = [
@@ -53,8 +55,12 @@ class MessageHandler:
         
         content = message.content.lower().strip()
         
+        # Handle greetings
         if self._is_greeting(content):
             await self._handle_greeting(message)
+        
+        # Handle potential klugscheißerei (independent of greetings)
+        await self._handle_potential_klugscheisserei(message)
 
     def _is_greeting(self, content):
         words = content.split()
@@ -106,3 +112,13 @@ class MessageHandler:
         except Exception as e:
             logger.error(f"Error handling greeting: {e}")
             await message.add_reaction("👋")
+
+    async def _handle_potential_klugscheisserei(self, message):
+        """Handle potential klugscheißerei for a message."""
+        try:
+            # Check if message should be klugscheißed
+            if await self.klugscheisser_handler.should_klugscheiss_message(message):
+                # Process klugscheißerei asynchronously to avoid blocking other message handling
+                await self.klugscheisser_handler.handle_klugscheisserei(message)
+        except Exception as e:
+            logger.error(f"Error in klugscheißer handling: {e}")
