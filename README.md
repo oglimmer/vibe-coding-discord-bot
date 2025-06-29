@@ -33,6 +33,7 @@ For a production deployment, you can use Sealed Secrets to securely manage your 
 kubectl create secret generic discord-bot-secrets \
   --from-literal=DISCORD_TOKEN="XXX" \
   --from-literal=DB_PASSWORD="XXX" \
+  --from-literal=OPENAI_API_KEY="XXX" \
   --namespace=default \
   --dry-run=client -o yaml | \
   kubeseal -o yaml > sealed-secrets/discord-bot-sealedsecret.yaml
@@ -44,6 +45,7 @@ for a test deployment, you can create a Kubernetes secret directly:
 kubectl create secret generic discord-bot-vibe-secrets \
           --from-literal=DB_PASSWORD="XXX" \
           --from-literal=DISCORD_TOKEN="XXX" \
+          --from-literal=OPENAI_API_KEY="XXX" \
           --namespace=default
 ```
 

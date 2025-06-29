@@ -114,6 +114,7 @@ secrets:
   # These should remain empty in values.yaml - secrets come from SealedSecret
   discordToken: ""
   dbPassword: ""
+  openaiApiKey: ""
 
 # Secret reference configuration for SealedSecrets
 secretRef:
