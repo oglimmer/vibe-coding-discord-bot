@@ -8,6 +8,7 @@ import discord
 from config import Config, setup_logging
 from database import DatabaseManager
 from handlers.message_handler import MessageHandler
+from handlers.factcheck_handler import FactCheckHandler
 from commands.greetings_command import setup as setup_greetings_command
 from commands.game_1337_command import setup as setup_game_1337_command
 from commands.bet_1337_command import setup as setup_bet_1337_command
@@ -16,6 +17,7 @@ from commands.info_1337_command import setup as setup_info_1337_command
 from commands.stats_1337_command import setup as setup_stats_1337_command
 from commands.rules_1337_command import setup as setup_rules_1337_command
 from commands.about_command import setup as setup_about_command
+from commands.klugscheisser_command import setup as setup_klugscheisser_command
 
 logger = setup_logging()
 
@@ -34,11 +36,13 @@ class DiscordBot(commands.Bot):
         
         self.db_manager = None
         self.message_handler = None
+        self.factcheck_handler = None
     
     async def setup_hook(self):
         try:
             self.db_manager = DatabaseManager()
             self.message_handler = MessageHandler(self.db_manager)
+            self.factcheck_handler = FactCheckHandler(self.db_manager)
             
             await setup_greetings_command(self, self.db_manager)
             await setup_game_1337_command(self, self.db_manager)
@@ -48,6 +52,7 @@ class DiscordBot(commands.Bot):
             await setup_stats_1337_command(self, self.db_manager)
             await setup_rules_1337_command(self, self.db_manager)
             await setup_about_command(self)
+            await setup_klugscheisser_command(self, self.db_manager)
             
             await self.tree.sync()
             logger.info("Command tree synced successfully")
@@ -82,6 +87,12 @@ class DiscordBot(commands.Bot):
             return
         
         try:
+            # Check if this is a fact-check reaction
+            if self.factcheck_handler:
+                factcheck_handled = await self.factcheck_handler.handle_factcheck_reaction(reaction, user)
+                if factcheck_handled:
+                    return  # Fact-check was processed, don't continue with other reaction handling
+            
             # Check if this is a reaction to a greeting message
             greeting_id = self.db_manager.get_greeting_id_by_message(
                 reaction.message.id, 

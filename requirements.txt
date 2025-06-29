@@ -1,4 +1,5 @@
 discord.py==2.5.2
 mariadb==1.1.12
-python-dotenv==1.1.1
+python-dotenv==1.1.0
 asyncio-mqtt==0.16.2
+openai>=1.0.0

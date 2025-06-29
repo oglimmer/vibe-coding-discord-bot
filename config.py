@@ -22,6 +22,20 @@ class Config:
     COMMANDER_ROLE_ID = int(os.getenv('COMMANDER_ROLE_ID', 0)) if os.getenv('COMMANDER_ROLE_ID') else None
     GENERAL_ROLE_ID = int(os.getenv('GENERAL_ROLE_ID', 0)) if os.getenv('GENERAL_ROLE_ID') else None
     ANNOUNCEMENT_CHANNEL_ID = int(os.getenv('ANNOUNCEMENT_CHANNEL_ID', 0)) if os.getenv('ANNOUNCEMENT_CHANNEL_ID') else None
+    
+    # Klugscheißer Configuration
+    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    KLUGSCHEISSER_ENABLED = os.getenv('KLUGSCHEISSER_ENABLED', 'false').lower() == 'true'
+    KLUGSCHEISSER_PROBABILITY = int(os.getenv('KLUGSCHEISSER_PROBABILITY', 10))
+    KLUGSCHEISSER_MIN_LENGTH = int(os.getenv('KLUGSCHEISSER_MIN_LENGTH', 100))
+    KLUGSCHEISSER_MAX_TOKENS = int(os.getenv('KLUGSCHEISSER_MAX_TOKENS', 200))
+    KLUGSCHEISSER_MODEL = os.getenv('KLUGSCHEISSER_MODEL', 'gpt-3.5-turbo')
+    KLUGSCHEISSER_COOLDOWN_SECONDS = int(os.getenv('KLUGSCHEISSER_COOLDOWN_SECONDS', 60))
+    KLUGSCHEISSER_REQUIRE_OPTIN = os.getenv('KLUGSCHEISSER_REQUIRE_OPTIN', 'true').lower() == 'true'
+    
+    # Reaction-based Fact Checking Configuration
+    FACTCHECK_REACTION_EMOJI = os.getenv('FACTCHECK_REACTION_EMOJI', '🔍')
+    FACTCHECK_DAILY_LIMIT_PER_USER = int(os.getenv('FACTCHECK_DAILY_LIMIT_PER_USER', 5))
 
 def setup_logging():
     logging.basicConfig(
