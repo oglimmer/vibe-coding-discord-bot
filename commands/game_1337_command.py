@@ -334,7 +334,7 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
             try:
                 # Create guild-specific message with role change info
                 guild_current_roles = current_role_holders.get(guild.id, {})
-                message = self.game_logic.create_winner_message(winner_data, top_14_day, top_365_day, guild.id, guild_current_roles)
+                message = self.game_logic.create_winner_message(winner_data, guild.id, guild_current_roles)
                 
                 # Try configured announcement channel first
                 if Config.ANNOUNCEMENT_CHANNEL_ID:
