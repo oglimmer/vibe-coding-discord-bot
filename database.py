@@ -155,7 +155,7 @@ class DatabaseManager:
                     target_username VARCHAR(255) NOT NULL,
                     message_content TEXT NOT NULL,
                     request_date DATE NOT NULL,
-                    score TINYINT CHECK (score >= 0 AND score <= 9),
+                    score TINYINT UNSIGNED CHECK (score >= 0 AND score <= 100),
                     factcheck_response TEXT,
                     is_factcheckable BOOLEAN DEFAULT TRUE,
                     server_id BIGINT,
@@ -872,7 +872,8 @@ class DatabaseManager:
             
             # Sort options
             sort_options = {
-                "score_asc": "avg_score ASC, times_checked_by_others DESC",
+                "score_asc": "avg_score ASC, times_checked_by_others DESC",  # Lowest accuracy first (most bullshit)
+                "score_desc": "avg_score DESC, times_checked_by_others DESC",  # Highest accuracy first
                 "checked_desc": "times_checked_by_others DESC, avg_score ASC",
                 "activity_desc": "total_activity DESC, avg_score ASC",
                 "requests_desc": "total_requests DESC, avg_score ASC"
@@ -895,7 +896,14 @@ class DatabaseManager:
                     -- Total activity
                     (COUNT(target_checks.id) + COALESCE(self_checks.self_check_count, 0) + COALESCE(requester_stats.total_requests, 0)) as total_activity,
                     -- Worst single score (from others only)
-                    COALESCE(MIN(target_checks.score), 0) as worst_score
+                    COALESCE(MIN(target_checks.score), 0) as worst_score,
+                    -- Weighted Score: avg_score * log(check_count) for better weighting
+                    -- Lower accuracy percentage = higher on bullshit board
+                    CASE 
+                        WHEN COUNT(target_checks.id) > 0 THEN 
+                            COALESCE(AVG(target_checks.score), 0) * LOG(COUNT(target_checks.id) + 1)
+                        ELSE 0 
+                    END as weighted_score
                 FROM klugscheisser_user_preferences u
                 LEFT JOIN (
                     -- Get latest username for each user
@@ -934,7 +942,7 @@ class DatabaseManager:
                 ) requester_stats ON u.user_id = requester_stats.requester_user_id
                 WHERE u.opted_in = TRUE
                 GROUP BY u.user_id, latest_username.username, self_checks.self_check_count, requester_stats.total_requests
-                HAVING COUNT(target_checks.id) >= 3  -- Min. 3x checked by OTHERS
+                HAVING COUNT(target_checks.id) >= 1  -- Min. 1x checked by OTHERS
                 ORDER BY {order_clause}
                 LIMIT {per_page} OFFSET {offset}
             """
@@ -951,7 +959,8 @@ class DatabaseManager:
                     'self_checks': row[4],
                     'total_requests': row[5],
                     'total_activity': row[6],
-                    'worst_score': row[7]
+                    'worst_score': row[7],
+                    'weighted_score': float(row[8]) if row[8] else 0.0
                 }
                 for row in results
             ]
@@ -979,7 +988,7 @@ class DatabaseManager:
                     AND target_checks.request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
                 WHERE u.opted_in = TRUE
                 GROUP BY u.user_id
-                HAVING COUNT(target_checks.id) >= 3  -- Min. 3x checked by OTHERS
+                HAVING COUNT(target_checks.id) >= 1  -- Min. 1x checked by OTHERS
             """, (days,))
             
             result = cursor.fetchone()

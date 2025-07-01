@@ -448,42 +448,24 @@ class KlugscheisserCommand(commands.Cog):
 
     @discord.app_commands.command(
         name="bullshit",
-        description="🗑️ Show the bullshit board - users with worst fact-check scores"
+        description="🗑️ Show the bullshit board - users with worst fact-check scores from last 30 days"
     )
-    @discord.app_commands.describe(
-        days="Days to look back (default: 30)",
-        page="Page number (default: 1)"
-    )
-    async def bullshit(self, interaction: discord.Interaction, days: int = 30, page: int = 1):
-        """Show the bullshit board with users ranked by worst fact-check scores."""
+    async def bullshit(self, interaction: discord.Interaction):
+        """Show the bullshit board with users ranked by worst fact-check scores from the last 30 days."""
         try:
-            # Validate inputs
-            if days < 1 or days > 365:
-                await interaction.response.send_message(
-                    "❌ Tage müssen zwischen 1 und 365 liegen.",
-                    ephemeral=True
-                )
-                return
-                
-            if page < 1:
-                await interaction.response.send_message(
-                    "❌ Seite muss mindestens 1 sein.",
-                    ephemeral=True
-                )
-                return
-            
-            # Convert to 0-based page index
-            page_index = page - 1
+            # Fixed to last 30 days, starting at page 0
+            days = 30
+            page_index = 0
             
             # Defer response as this might take a while
             await interaction.response.defer()
             
-            # Get data
+            # Get data for last 30 days, no minimum check requirement
             board_data = self.db_manager.get_bullshit_board_data(
                 page=page_index, 
                 per_page=10, 
                 days=days, 
-                sort_by="score_asc"
+                sort_by="score_asc"  # Lowest accuracy first (most bullshit)
             )
             total_count = self.db_manager.get_bullshit_board_count(days=days)
             total_pages = (total_count + 9) // 10  # Ceiling division
@@ -491,19 +473,19 @@ class KlugscheisserCommand(commands.Cog):
             if not board_data:
                 embed = discord.Embed(
                     title="🗑️ Bullshit Board",
-                    description="Keine Daten verfügbar. Es müssen mindestens 3 Faktenchecks von anderen Usern vorliegen.",
+                    description="Keine Faktenchecks in den letzten 30 Tagen gefunden.",
                     color=discord.Color.orange()
                 )
                 await interaction.followup.send(embed=embed)
                 return
             
-            # Format the bullshit board table
-            table_content = self._format_bullshit_table(board_data, page_index, total_pages, days)
+            # Format the bullshit board embed
+            embed = self._format_bullshit_embed(board_data, page_index, total_pages, 30)
             
             # Create view with navigation buttons
-            view = BullshitBoardView(page_index, total_pages, days, self.db_manager)
+            view = BullshitBoardView(page_index, total_pages, 30, self.db_manager)
             
-            await interaction.followup.send(content=table_content, view=view)
+            await interaction.followup.send(embed=embed, view=view)
             
         except Exception as e:
             logger.error(f"Error in bullshit_board command: {e}")
@@ -518,38 +500,55 @@ class KlugscheisserCommand(commands.Cog):
                     ephemeral=True
                 )
     
-    def _format_bullshit_table(self, board_data, page, total_pages, days):
-        """Format the bullshit board as a nice table."""
-        # Start the code block for monospace formatting
-        table = "```\n"
-        table += "🗑️ BULLSHIT BOARD 🗑️\n"
-        table += "═" * 70 + "\n"
-        table += f"{'Rank':<6}{'User':<16}{'Score':<12}{'Others':<8}{'Self':<6}{'Req':<5}{'Total':<7}\n"
-        table += "─" * 70 + "\n"
+    def _format_bullshit_embed(self, board_data, page, total_pages, days):
+        """Format the bullshit board as a simplified Discord embed."""
+        embed = discord.Embed(
+            title="🗑️ Bullshit Board",
+            description="User nach Faktenchecker-Genauigkeit sortiert (niedrigste zuerst)",
+            color=discord.Color.red()
+        )
         
+        if not board_data:
+            embed.add_field(
+                name="📭 Keine Daten",
+                value="Keine Faktenchecks in den letzten 30 Tagen gefunden.",
+                inline=False
+            )
+            return embed
+        
+        # Create ranking list
+        ranking_text = ""
         for i, user in enumerate(board_data):
             rank = (page * 10) + i + 1
             rank_emoji = self._get_rank_emoji(rank)
             score_emoji = self._get_score_emoji_for_board(user['avg_score'])
             
-            # Truncate username if too long
-            username = user['username'][:13] + "..." if len(user['username']) > 13 else user['username']
-            
-            table += f"{rank_emoji:<6}"  # Rank with emoji
-            table += f"{username:<16}"  # Username
-            table += f"{user['avg_score']:.1f}/9{score_emoji:<12}"  # Score with emoji
-            table += f"{user['times_checked_by_others']:<8}"  # Checked by others
-            table += f"{user['self_checks']:<6}"  # Self checks
-            table += f"{user['total_requests']:<5}"  # Requests made
-            table += f"{user['total_activity']:<7}\n"  # Total activity
+            # Simplified display: rank, username, score, check count
+            ranking_text += f"{rank_emoji} {user['avg_score']:.1f}% **{user['username']}** {score_emoji} ({user['times_checked_by_others']} checks)\n"
         
-        table += "─" * 70 + "\n"
-        table += f"📄 Seite {page+1}/{total_pages} • Zeitraum: {days} Tage\n"
-        table += "Others=Von anderen gecheckt • Self=Selbst gecheckt • Req=Angefordert\n"
-        table += "Nur User mit ≥3 Checks von anderen • Self-Checks zählen NICHT zum Score"
-        table += "\n```"
+        embed.add_field(
+            name="🏆 Ranking",
+            value=ranking_text,
+            inline=False
+        )
         
-        return table
+        # Add score explanation
+        embed.add_field(
+            name="📈 Score-Erklärung",
+            value=(
+                "**Sortierung: Niedrigste Genauigkeit zuerst (die größten Bullshitter oben)**\n"
+                "Genauigkeit: 0% = völliger Bullshit, 100% = komplett korrekt\n"
+                "Emojis: ❌ 0-20% • ⚠️ 21-40% • 🤔 41-60% • ✅ 61-80% • 💯 81-100%"
+            ),
+            inline=False
+        )
+        
+        # Add footer with pagination info
+        embed.set_footer(
+            text=f"Seite {page+1}/{total_pages} • Letzte 30 Tage • Self-Checks zählen nicht zum Score"
+        )
+        
+        return embed
     
     def _get_rank_emoji(self, rank):
         """Get emoji for rank position."""
@@ -565,19 +564,17 @@ class KlugscheisserCommand(commands.Cog):
             return f"{rank}"
     
     def _get_score_emoji_for_board(self, score):
-        """Get emoji for score in board context."""
-        if score <= 1.5:
-            return "💀"  # Death emoji for really bad scores
-        elif score <= 2.5:
-            return "❌"
-        elif score <= 4.0:
-            return "⚠️"
-        elif score <= 6.0:
-            return "🤔"
-        elif score <= 8.0:
-            return "✅"
+        """Get emoji for accuracy score in board context (consistent with factcheck handler)."""
+        if score <= 20:
+            return "❌"  # 0-20%: Definitiv falsch
+        elif score <= 40:
+            return "⚠️"  # 21-40%: Größtenteils falsch
+        elif score <= 60:
+            return "🤔"  # 41-60%: Gemischt
+        elif score <= 80:
+            return "✅"  # 61-80%: Größtenteils korrekt
         else:
-            return "💯"
+            return "💯"  # 81-100%: Vollständig korrekt
 
     @discord.app_commands.command(
         name="fact_stats",
@@ -676,13 +673,13 @@ class BullshitBoardView(discord.ui.View):
                 )
                 
                 if board_data:
-                    # Format new table
-                    table_content = self._format_bullshit_table(board_data, new_page, self.total_pages, self.days)
+                    # Format new embed
+                    embed = self._format_bullshit_embed(board_data, new_page, self.total_pages, self.days)
                     
                     # Update view
                     new_view = BullshitBoardView(new_page, self.total_pages, self.days, self.db_manager)
                     
-                    await interaction.response.edit_message(content=table_content, view=new_view)
+                    await interaction.response.edit_message(embed=embed, view=new_view)
                 else:
                     await interaction.response.send_message("❌ Keine Daten verfügbar.", ephemeral=True)
             else:
@@ -708,13 +705,13 @@ class BullshitBoardView(discord.ui.View):
                 )
                 
                 if board_data:
-                    # Format new table
-                    table_content = self._format_bullshit_table(board_data, new_page, self.total_pages, self.days)
+                    # Format new embed
+                    embed = self._format_bullshit_embed(board_data, new_page, self.total_pages, self.days)
                     
                     # Update view
                     new_view = BullshitBoardView(new_page, self.total_pages, self.days, self.db_manager)
                     
-                    await interaction.response.edit_message(content=table_content, view=new_view)
+                    await interaction.response.edit_message(embed=embed, view=new_view)
                 else:
                     await interaction.response.send_message("❌ Keine Daten verfügbar.", ephemeral=True)
             else:
@@ -739,13 +736,13 @@ class BullshitBoardView(discord.ui.View):
             new_total_pages = (total_count + 9) // 10
             
             if board_data:
-                # Format refreshed table
-                table_content = self._format_bullshit_table(board_data, self.page, new_total_pages, self.days)
+                # Format refreshed embed
+                embed = self._format_bullshit_embed(board_data, self.page, new_total_pages, self.days)
                 
                 # Update view with potentially new total pages
                 new_view = BullshitBoardView(self.page, new_total_pages, self.days, self.db_manager)
                 
-                await interaction.response.edit_message(content=table_content, view=new_view)
+                await interaction.response.edit_message(embed=embed, view=new_view)
             else:
                 await interaction.response.send_message("❌ Keine Daten verfügbar.", ephemeral=True)
                 
@@ -756,10 +753,10 @@ class BullshitBoardView(discord.ui.View):
     @discord.ui.select(
         placeholder="Sortierung wählen...",
         options=[
-            discord.SelectOption(label="🗑️ Schlechtester Score", value="score_asc", description="Nach niedrigstem Durchschnittsscore"),
+            discord.SelectOption(label="🗑️ Meister Bullshit", value="score_asc", description="Niedrigste Genauigkeit zuerst (Standard)"),
+            discord.SelectOption(label="🏆 Beste Genauigkeit", value="score_desc", description="Höchste Genauigkeit zuerst"),
             discord.SelectOption(label="📝 Meist gecheckt", value="checked_desc", description="Nach Anzahl Checks von anderen"),
-            discord.SelectOption(label="🔥 Aktivste User", value="activity_desc", description="Nach Gesamt-Aktivität"),
-            discord.SelectOption(label="🔍 Meiste Requests", value="requests_desc", description="Nach angeforderten Faktenchecks")
+            discord.SelectOption(label="🔥 Aktivste User", value="activity_desc", description="Nach Gesamt-Aktivität")
         ]
     )
     async def sort_select(self, interaction: discord.Interaction, select: discord.ui.Select):
@@ -776,8 +773,8 @@ class BullshitBoardView(discord.ui.View):
             )
             
             if board_data:
-                # Format table with new sorting
-                table_content = self._format_bullshit_table(board_data, 0, self.total_pages, self.days)
+                # Format embed with new sorting
+                embed = self._format_bullshit_embed(board_data, 0, self.total_pages, self.days)
                 
                 # Update view (reset to page 0)
                 new_view = BullshitBoardView(0, self.total_pages, self.days, self.db_manager)
@@ -785,7 +782,7 @@ class BullshitBoardView(discord.ui.View):
                 for option in new_view.sort_select.options:
                     option.default = (option.value == sort_by)
                 
-                await interaction.response.edit_message(content=table_content, view=new_view)
+                await interaction.response.edit_message(embed=embed, view=new_view)
             else:
                 await interaction.response.send_message("❌ Keine Daten verfügbar.", ephemeral=True)
                 
@@ -793,37 +790,55 @@ class BullshitBoardView(discord.ui.View):
             logger.error(f"Error in sort_select: {e}")
             await interaction.response.send_message("❌ Fehler beim Sortieren.", ephemeral=True)
     
-    def _format_bullshit_table(self, board_data, page, total_pages, days):
-        """Format the bullshit board as a nice table (same as in command class)."""
-        table = "```\n"
-        table += "🗑️ BULLSHIT BOARD 🗑️\n"
-        table += "═" * 70 + "\n"
-        table += f"{'Rank':<6}{'User':<16}{'Score':<12}{'Others':<8}{'Self':<6}{'Req':<5}{'Total':<7}\n"
-        table += "─" * 70 + "\n"
+    def _format_bullshit_embed(self, board_data, page, total_pages, days):
+        """Format the bullshit board as a simplified Discord embed (same as in command class)."""
+        embed = discord.Embed(
+            title="🗑️ Bullshit Board",
+            description="User nach Faktenchecker-Genauigkeit sortiert (niedrigste zuerst)",
+            color=discord.Color.red()
+        )
         
+        if not board_data:
+            embed.add_field(
+                name="📭 Keine Daten",
+                value="Keine Faktenchecks in den letzten 30 Tagen gefunden.",
+                inline=False
+            )
+            return embed
+        
+        # Create ranking list
+        ranking_text = ""
         for i, user in enumerate(board_data):
             rank = (page * 10) + i + 1
             rank_emoji = self._get_rank_emoji(rank)
             score_emoji = self._get_score_emoji_for_board(user['avg_score'])
             
-            # Truncate username if too long
-            username = user['username'][:13] + "..." if len(user['username']) > 13 else user['username']
-            
-            table += f"{rank_emoji:<6}"  # Rank with emoji
-            table += f"{username:<16}"  # Username
-            table += f"{user['avg_score']:.1f}/9{score_emoji:<12}"  # Score with emoji
-            table += f"{user['times_checked_by_others']:<8}"  # Checked by others
-            table += f"{user['self_checks']:<6}"  # Self checks
-            table += f"{user['total_requests']:<5}"  # Requests made
-            table += f"{user['total_activity']:<7}\n"  # Total activity
+            # Simplified display: rank, username, score, check count
+            ranking_text += f"{rank_emoji} {user['avg_score']:.1f}% **{user['username']}** {score_emoji} ({user['times_checked_by_others']} checks)\n"
         
-        table += "─" * 70 + "\n"
-        table += f"📄 Seite {page+1}/{total_pages} • Zeitraum: {days} Tage\n"
-        table += "Others=Von anderen gecheckt • Self=Selbst gecheckt • Req=Angefordert\n"
-        table += "Nur User mit ≥3 Checks von anderen • Self-Checks zählen NICHT zum Score"
-        table += "\n```"
+        embed.add_field(
+            name="🏆 Ranking",
+            value=ranking_text,
+            inline=False
+        )
         
-        return table
+        # Add score explanation
+        embed.add_field(
+            name="📈 Score-Erklärung",
+            value=(
+                "**Sortierung: Niedrigste Genauigkeit zuerst (die größten Bullshitter oben)**\n"
+                "Genauigkeit: 0% = völliger Bullshit, 100% = komplett korrekt\n"
+                "Emojis: ❌ 0-20% • ⚠️ 21-40% • 🤔 41-60% • ✅ 61-80% • 💯 81-100%"
+            ),
+            inline=False
+        )
+        
+        # Add footer with pagination info
+        embed.set_footer(
+            text=f"Seite {page+1}/{total_pages} • Letzte 30 Tage • Self-Checks zählen nicht zum Score"
+        )
+        
+        return embed
     
     def _get_rank_emoji(self, rank):
         """Get emoji for rank position."""
@@ -839,19 +854,17 @@ class BullshitBoardView(discord.ui.View):
             return f"{rank}"
     
     def _get_score_emoji_for_board(self, score):
-        """Get emoji for score in board context."""
-        if score <= 1.5:
-            return "💀"  # Death emoji for really bad scores
-        elif score <= 2.5:
-            return "❌"
-        elif score <= 4.0:
-            return "⚠️"
-        elif score <= 6.0:
-            return "🤔"
-        elif score <= 8.0:
-            return "✅"
+        """Get emoji for accuracy score in board context (consistent with factcheck handler)."""
+        if score <= 20:
+            return "❌"  # 0-20%: Definitiv falsch
+        elif score <= 40:
+            return "⚠️"  # 21-40%: Größtenteils falsch
+        elif score <= 60:
+            return "🤔"  # 41-60%: Gemischt
+        elif score <= 80:
+            return "✅"  # 61-80%: Größtenteils korrekt
         else:
-            return "💯"
+            return "💯"  # 81-100%: Vollständig korrekt
     
     async def on_timeout(self):
         """Handle view timeout."""

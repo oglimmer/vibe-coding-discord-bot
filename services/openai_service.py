@@ -309,15 +309,15 @@ Antworte nur mit dem Troll-Kommentar, keine Erklärungen.
                 messages=[
                     {
                         "role": "system",
-                        "content": """Du bist ein sachlicher Faktenchecker. Analysiere Nachrichten und bewerte ihre Korrektheit auf einer Skala von 0-9:
-0-2: Definitiv falsch/irreführend
-3-4: Größtenteils falsch mit wenigen korrekten Elementen
-5-6: Gemischt, sowohl korrekte als auch falsche Elemente
-7-8: Größtenteils korrekt mit kleineren Ungenauigkeiten
-9: Vollständig korrekt und faktisch
+                        "content": """Du bist ein sachlicher Faktenchecker. Analysiere Nachrichten und bewerte ihre Korrektheit als Prozentsatz von 0% bis 100%:
+0-20%: Definitiv falsch/irreführend
+21-40%: Größtenteils falsch mit wenigen korrekten Elementen
+41-60%: Gemischt, sowohl korrekte als auch falsche Elemente
+61-80%: Größtenteils korrekt mit kleineren Ungenauigkeiten
+81-100%: Vollständig korrekt und faktisch
 
 Antworte IMMER in folgendem JSON-Format:
-{"score": [Zahl 0-9], "explanation": "[Kurze deutsche Erklärung der Bewertung]"}"""
+{"score": [Ganzzahl 0-100], "explanation": "[Kurze deutsche Erklärung der Bewertung]"}"""
                     },
                     {
                         "role": "user",
@@ -338,14 +338,14 @@ Antworte IMMER in folgendem JSON-Format:
                         result = json.loads(content.strip())
                         if 'score' in result and 'explanation' in result:
                             score = int(result['score'])
-                            if 0 <= score <= 9:
-                                logger.info(f"Successfully generated reaction factcheck with score {score}")
+                            if 0 <= score <= 100:
+                                logger.info(f"Successfully generated reaction factcheck with score {score}%")
                                 return {
                                     'score': score,
                                     'response': result['explanation']
                                 }
                             else:
-                                logger.warning(f"Invalid score received: {score}")
+                                logger.warning(f"Invalid score received: {score}% (must be 0-100)")
                         else:
                             logger.warning("Missing required fields in factcheck response")
                     except (json.JSONDecodeError, ValueError) as e:
@@ -380,12 +380,12 @@ Antworte ausschließlich im JSON-Format mit einer Bewertung von 0-9 und einer au
         """Fallback method to extract score from non-JSON response."""
         import re
         
-        # Try to find a score in the text
-        score_match = re.search(r'(?:score|bewertung).*?([0-9])', text.lower())
+        # Try to find a score in the text (now looking for 0-100%)
+        score_match = re.search(r'(?:score|bewertung).*?([0-9]{1,3})', text.lower())
         if score_match:
             try:
                 score = int(score_match.group(1))
-                if 0 <= score <= 9:
+                if 0 <= score <= 100:
                     return {
                         'score': score,
                         'response': text.strip()
@@ -393,10 +393,10 @@ Antworte ausschließlich im JSON-Format mit einer Bewertung von 0-9 und einer au
             except ValueError:
                 pass
         
-        # Default fallback score if we can't parse
-        logger.warning("Could not extract score from response, using default score 5")
+        # Default fallback score if we can't parse (50% = neutral)
+        logger.warning("Could not extract score from response, using default score 50%")
         return {
-            'score': 5,
+            'score': 50,
             'response': text.strip() if text else "Faktencheckung nicht verfügbar."
         }
 
