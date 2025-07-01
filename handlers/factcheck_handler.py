@@ -15,13 +15,13 @@ class FactCheckHandler:
     def __init__(self, db_manager):
         self.db_manager = db_manager
         self.openai_service = OpenAIService()
-        # Map of score ranges to descriptive emojis
+        # Map of score ranges to descriptive emojis (0-100% scale)
         self.score_emojis = {
-            'false': '❌',      # 0-2: Definitiv falsch
-            'mostly_false': '⚠️',  # 3-4: Größtenteils falsch
-            'mixed': '🤔',     # 5-6: Gemischt
-            'mostly_true': '✅',   # 7-8: Größtenteils korrekt
-            'true': '💯'       # 9: Vollständig korrekt
+            'false': '❌',      # 0-20%: Definitiv falsch
+            'mostly_false': '⚠️',  # 21-40%: Größtenteils falsch
+            'mixed': '🤔',     # 41-60%: Gemischt
+            'mostly_true': '✅',   # 61-80%: Größtenteils korrekt
+            'true': '💯'       # 81-100%: Vollständig korrekt
         }
         
     async def handle_factcheck_reaction(self, reaction: discord.Reaction, user: discord.User) -> bool:
@@ -250,14 +250,14 @@ class FactCheckHandler:
             logger.error(f"Failed to send not-factcheckable message: {e}")
     
     def _get_score_emoji(self, score: int) -> str:
-        """Get the appropriate emoji for a given score."""
-        if score <= 2:
+        """Get the appropriate emoji for a given score (0-100% scale)."""
+        if score <= 20:
             return self.score_emojis['false']
-        elif score <= 4:
+        elif score <= 40:
             return self.score_emojis['mostly_false']
-        elif score <= 6:
+        elif score <= 60:
             return self.score_emojis['mixed']
-        elif score <= 8:
+        elif score <= 80:
             return self.score_emojis['mostly_true']
         else:
             return self.score_emojis['true']
@@ -269,21 +269,21 @@ class FactCheckHandler:
         response = factcheck_result['response']
         score_emoji = self._get_score_emoji(score)
         
-        # Determine color and description based on score
-        if score <= 2:
+        # Determine color and description based on score (0-100% scale)
+        if score <= 20:
             level = "❌ **Größtenteils falsch**"
-        elif score <= 4:
+        elif score <= 40:
             level = "⚠️ **Teilweise falsch**"
-        elif score <= 6:
+        elif score <= 60:
             level = "🤔 **Gemischt**"
-        elif score <= 8:
+        elif score <= 80:
             level = "✅ **Größtenteils korrekt**"
         else:
             level = "✅ **Korrekt**"
         
         formatted = f"""🔍 **Faktencheck angefordert von {requester.mention}**
 
-**Bewertung:** {score}/9 - {level}
+**Bewertung:** {score}% - {level}
 
 {response}
 
