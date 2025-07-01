@@ -678,8 +678,9 @@ class TestGame1337Logic(unittest.TestCase):
         
         assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
         
-        # No General should be assigned since top player is already General
-        self.assertNotIn('general', assignments)
+        # General should be assigned since top player has more wins than second place
+        # The assignment should include the same user who's already general
+        self.assertEqual(assignments['general'], 456)
 
     def test_determine_new_role_assignments_general_tied_wins(self):
         """Test General assignment - top two players have same wins, no General assigned"""
@@ -749,9 +750,9 @@ class TestGame1337Logic(unittest.TestCase):
         
         assignments = self.logic.determine_new_role_assignments(winner_today, current_roles, 12345)
         
-        # No Commander should be assigned since top player is already Commander
-        # and second place doesn't have MORE wins than anyone else
-        self.assertNotIn('commander', assignments)
+        # Commander should be assigned since top player has more wins than second place
+        # The assignment should include the same user who's already commander
+        self.assertEqual(assignments['commander'], 789)
 
     def test_determine_new_role_assignments_commander_general_leads_14day(self):
         """Test Commander assignment - General also leads 14-day stats, pick second place"""

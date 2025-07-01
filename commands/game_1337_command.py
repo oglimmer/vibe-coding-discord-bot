@@ -103,60 +103,101 @@ class Game1337Command(commands.Cog):
 
     async def _determine_daily_winner(self):
         """Determine the daily winner using game logic"""
-        game_date = self.game_logic.get_game_date()
-        win_time = self.game_logic.get_daily_win_time(game_date)
+        try:
+            logger.debug("Starting daily winner determination")
+            game_date = self.game_logic.get_game_date()
+            win_time = self.game_logic.get_daily_win_time(game_date)
+            logger.debug(f"Game date: {game_date}, Win time: {win_time}")
 
-        # Wait until the exact win_time passes with millisecond precision
-        now = datetime.now()
-        if now < win_time:
-            wait_seconds = (win_time - now).total_seconds()
-            logger.info(f"Waiting {wait_seconds:.3f} seconds until win time: {self.game_logic.format_time_with_ms(win_time)}")
-            
-            # Use asyncio.sleep for most of the wait, but switch to busy-wait for final 10ms
-            if wait_seconds > 0.01:  # More than 10ms to wait
-                await asyncio.sleep(wait_seconds - 0.01)  # Sleep until 10ms before target
-            
-            # High-precision busy-wait for the final milliseconds
-            while datetime.now() < win_time:
-                await asyncio.sleep(0.0001)  # Very short sleep to yield control
-            
-            # Verify we hit the timing correctly
-            actual_time = datetime.now()
-            time_diff = (actual_time - win_time).total_seconds() * 1000  # Convert to milliseconds
-            logger.info(f"Winner determination triggered at: {self.game_logic.format_time_with_ms(actual_time)} (diff: {time_diff:.1f}ms)")
+            # Wait until the exact win_time passes with millisecond precision
+            now = datetime.now()
+            if now < win_time:
+                wait_seconds = (win_time - now).total_seconds()
+                logger.info(f"Waiting {wait_seconds:.3f} seconds until win time: {self.game_logic.format_time_with_ms(win_time)}")
 
-        winner_result = self.game_logic.determine_winner(game_date, win_time)
+                # Use asyncio.sleep for most of the wait, but switch to busy-wait for final 10ms
+                if wait_seconds > 0.01:  # More than 10ms to wait
+                    await asyncio.sleep(wait_seconds - 0.01)  # Sleep until 10ms before target
+
+                # High-precision busy-wait for the final milliseconds
+                while datetime.now() < win_time:
+                    await asyncio.sleep(0.0001)  # Very short sleep to yield control
+
+                # Verify we hit the timing correctly
+                actual_time = datetime.now()
+                time_diff = (actual_time - win_time).total_seconds() * 1000  # Convert to milliseconds
+                logger.info(f"Winner determination triggered at: {self.game_logic.format_time_with_ms(actual_time)} (diff: {time_diff:.1f}ms)")
+
+            try:
+                logger.debug(f"Determining winner for {game_date} at {win_time}")
+                winner_result = self.game_logic.determine_winner(game_date, win_time)
+                logger.debug(f"Winner result: {winner_result}")
+            except Exception as e:
+                logger.error(f"Error determining winner: {e}", exc_info=True)
+                return
+
+            if not winner_result:
+                logger.info(f"No winner for {game_date}")
+                try:
+                    await self._announce_no_winner()
+                except Exception as e:
+                    logger.error(f"Error announcing no winner: {e}", exc_info=True)
+                return
+
+            if winner_result.get('catastrophic_event'):
+                logger.info(f"Catastrophic event detected for {game_date}")
+                try:
+                    await self._announce_catastrophic_event()
+                except Exception as e:
+                    logger.error(f"Error announcing catastrophic event: {e}", exc_info=True)
+                return
+
+            # Get current role holders before updating roles
+            current_role_holders = {}
+            try:
+                logger.debug(f"Getting current role holders for {len(self.bot.guilds)} guilds")
+                for guild in self.bot.guilds:
+                    try:
+                        logger.debug(f"Processing guild: {guild.name} (ID: {guild.id})")
+                        guild_roles = {
+                            'general': self.db_manager.get_role_assignment(guild.id, 'general'),
+                            'commander': self.db_manager.get_role_assignment(guild.id, 'commander'),
+                            'sergeant': self.db_manager.get_role_assignment(guild.id, 'sergeant')
+                        }
+                        current_role_holders[guild.id] = guild_roles
+                        logger.debug(f"Guild {guild.id} roles: {guild_roles}")
+                    except Exception as e:
+                        logger.error(f"Error getting role assignments for guild {guild.id}: {e}", exc_info=True)
+                        current_role_holders[guild.id] = {'general': None, 'commander': None, 'sergeant': None}
+            except Exception as e:
+                logger.error(f"Error getting current role holders: {e}", exc_info=True)
+                current_role_holders = {}
+
+            # Save winner to database
+            try:
+                logger.debug(f"Saving winner to database: {winner_result}")
+                success = self.game_logic.save_winner(winner_result)
+                logger.debug(f"Save winner result: {success}")
+            except Exception as e:
+                logger.error(f"Error saving winner to database: {e}", exc_info=True)
+                success = False
+
+            if success:
+                logger.info(f"Winner saved to database successfully")
+                try:
+                    logger.debug("Updating roles...")
+                    await self._update_roles()
+                    logger.debug("Announcing winner...")
+                    await self._announce_winner(winner_result, current_role_holders)
+                except Exception as e:
+                    logger.error(f"Error in post-save operations: {e}", exc_info=True)
+            else:
+                logger.error(f"Failed to save winner to database")
+
+            logger.info(f"Winner determination complete for {game_date}: {winner_result.get('username', 'Unknown')}")
         
-        if not winner_result:
-            logger.info(f"No winner for {game_date}")
-            await self._announce_no_winner()
-            return
-            
-        if winner_result.get('catastrophic_event'):
-            logger.info(f"Catastrophic event detected for {game_date}")
-            await self._announce_catastrophic_event()
-            return
-
-        # Get current role holders before updating roles
-        current_role_holders = {}
-        for guild in self.bot.guilds:
-            current_role_holders[guild.id] = {
-                'general': self.db_manager.get_role_assignment(guild.id, 'general'),
-                'commander': self.db_manager.get_role_assignment(guild.id, 'commander'), 
-                'sergeant': self.db_manager.get_role_assignment(guild.id, 'sergeant')
-            }
-        
-        # Save winner to database
-        success = self.game_logic.save_winner(winner_result)
-        
-        if success:
-            logger.info(f"Winner saved to database successfully")
-            await self._update_roles()
-            await self._announce_winner(winner_result, current_role_holders)
-        else:
-            logger.error(f"Failed to save winner to database")
-
-        logger.info(f"Winner determination complete for {game_date}: {winner_result['username']}")
+        except Exception as e:
+            logger.error(f"Critical error in _determine_daily_winner: {e}", exc_info=True)
 
     async def _announce_catastrophic_event(self):
         """Announce a catastrophic event to all guilds"""
@@ -250,15 +291,20 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
         current_assignments = self.db_manager.get_all_role_assignments(guild.id)
         logger.debug(f"Current role assignments: {current_assignments}")
 
-        # Remove previous role assignments from Discord members
-        await self._remove_previous_role_assignments(guild, current_assignments)
-
+        # Convert current assignments to expected format
+        current_roles = {}
+        for assignment in current_assignments:
+            current_roles[assignment['role_type']] = {
+                'user_id': assignment['user_id'],
+                'username': assignment.get('username', 'Unknown')
+            }
+        
         # Determine new role assignments
-        new_assignments = self._determine_new_role_assignments(winner_today, top_14_day, top_365_day)
+        new_assignments = self._determine_new_role_assignments(winner_today, current_roles, guild.id)
         logger.debug(f"New role assignments: {new_assignments}")
 
-        # Apply new role assignments
-        await self._apply_new_role_assignments(guild, new_assignments, sergeant_role, commander_role, general_role)
+        # Update roles efficiently - only change what needs to be changed
+        await self._update_role_assignments_efficiently(guild, current_roles, new_assignments, sergeant_role, commander_role, general_role)
 
     async def _remove_previous_role_assignments(self, guild, current_assignments):
         """Remove roles from users who currently have them"""
@@ -274,9 +320,57 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
             else:
                 logger.warning(f"Member {assignment['user_id']} not found in guild {guild.name}")
 
-    def _determine_new_role_assignments(self, winner_today, top_14_day, top_365_day):
+    def _determine_new_role_assignments(self, winner_today, current_roles, guild_id):
         """Determine who should get which roles based on game statistics"""
-        return self.game_logic.determine_new_role_assignments(winner_today, top_14_day, top_365_day)
+        return self.game_logic.determine_new_role_assignments(winner_today, current_roles, guild_id)
+
+    async def _update_role_assignments_efficiently(self, guild, current_roles, new_assignments, sergeant_role, commander_role, general_role):
+        """Update role assignments efficiently - only change what needs to be changed"""
+        role_objects = {
+            'sergeant': sergeant_role,
+            'commander': commander_role, 
+            'general': general_role
+        }
+        
+        # For each role type, check if there's a change needed
+        for role_type in ['sergeant', 'commander', 'general']:
+            role = role_objects.get(role_type)
+            if not role:
+                logger.warning(f"Role {role_type} not configured, skipping")
+                continue
+            
+            # Get current holder
+            current_holder = current_roles.get(role_type)
+            current_user_id = current_holder['user_id'] if current_holder else None
+            
+            # Get new holder
+            new_user_id = new_assignments.get(role_type)
+            
+            # Only make changes if there's actually a difference
+            if current_user_id != new_user_id:
+                # Remove role from current holder (if any)
+                if current_user_id:
+                    current_member = guild.get_member(current_user_id)
+                    if current_member and role in current_member.roles:
+                        logger.info(f"Removing {role_type} role from {current_member.display_name}")
+                        await current_member.remove_roles(role)
+                    # Remove from database
+                    self.db_manager.remove_role_assignment(guild.id, role_type)
+                
+                # Add role to new holder (if any)
+                if new_user_id:
+                    new_member = guild.get_member(new_user_id)
+                    if new_member:
+                        logger.info(f"Assigning {role_type} role to {new_member.display_name}")
+                        await new_member.add_roles(role)
+                        # Update database
+                        success = self.db_manager.set_role_assignment(guild.id, new_user_id, role_type, role.id)
+                        if not success:
+                            logger.error(f"Failed to update database for {role_type} assignment to {new_member.display_name}")
+                    else:
+                        logger.warning(f"Member {new_user_id} not found in guild {guild.name}, skipping {role_type} assignment")
+            else:
+                logger.debug(f"No change needed for {role_type} role")
 
     async def _apply_new_role_assignments(self, guild, assignments, sergeant_role, commander_role, general_role):
         """Apply new role assignments to Discord members and update database"""
@@ -312,29 +406,47 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
     async def _announce_winner(self, winner_data, current_role_holders):
         """Announce the daily winner to configured channels"""
         try:
+            logger.debug(f"Starting winner announcement. Winner data: {winner_data}")
+            logger.debug(f"Current role holders: {current_role_holders}")
+            
             # Get role information for announcement
+            logger.debug("Getting winner stats for announcement")
             winner_14_days = self.game_logic.get_winner_stats(days=14)
             winner_365_days = self.game_logic.get_winner_stats(days=365)
+            logger.debug(f"14-day stats: {winner_14_days}")
+            logger.debug(f"365-day stats: {winner_365_days}")
             
             top_14_day = winner_14_days[0] if winner_14_days else None
             top_365_day = winner_365_days[0] if winner_365_days else None
+            logger.debug(f"Top 14-day: {top_14_day}, Top 365-day: {top_365_day}")
             
             # Send to configured announcement channel or fallback to first available channel
             await self._send_winner_announcement(winner_data, top_14_day, top_365_day, current_role_holders)
                 
         except Exception as e:
-            logger.error(f"Error in winner announcement: {e}")
+            logger.error(f"Error in winner announcement: {e}", exc_info=True)
 
 
     async def _send_winner_announcement(self, winner_data, top_14_day, top_365_day, current_role_holders):
         """Send winner announcement to all guilds"""
         message_sent = False
+        logger.debug(f"Sending winner announcement to {len(self.bot.guilds)} guilds")
         
         for guild in self.bot.guilds:
             try:
+                logger.debug(f"Processing announcement for guild: {guild.name} (ID: {guild.id})")
+                
                 # Create guild-specific message with role change info
                 guild_current_roles = current_role_holders.get(guild.id, {})
+                logger.debug(f"Guild {guild.id} current roles: {guild_current_roles}")
+                
+                if guild_current_roles is None:
+                    logger.warning(f"Guild {guild.id} has None for current_role_holders - this may cause the NoneType error")
+                    guild_current_roles = {}
+                
+                logger.debug(f"Creating winner message for guild {guild.id}")
                 message = self.game_logic.create_winner_message(winner_data, guild.id, guild_current_roles)
+                logger.debug(f"Created message for guild {guild.id}: {message[:100]}...")
                 
                 # Try configured announcement channel first
                 if Config.ANNOUNCEMENT_CHANNEL_ID:
@@ -354,7 +466,9 @@ The 1337 gods are not amused... try again tomorrow! 😤"""
                         break
                         
             except Exception as e:
-                logger.error(f"Error sending winner announcement in guild {guild.id}: {e}")
+                logger.error(f"Error sending winner announcement in guild {guild.id}: {e}", exc_info=True)
+                logger.debug(f"Guild {guild.id} details - Name: {guild.name}, current_role_holders entry: {current_role_holders.get(guild.id)}")
+                logger.debug(f"Full current_role_holders: {current_role_holders}")
         
         if not message_sent:
             logger.warning("Could not send winner announcement to any channel")

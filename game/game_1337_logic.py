@@ -401,40 +401,31 @@ class Game1337Logic:
         
         # 1. General: Player who has won MORE games in past 365 days than any other player
         if top_365_players and len(top_365_players) >= 2:
-            current_general_id = current_roles.get('general', {}).get('user_id')
             top_player = top_365_players[0]
             second_player = top_365_players[1]
             
-            # Only assign General if top player has MORE wins than second place
-            # and is not already the General
-            if (top_player['wins'] > second_player['wins'] and 
-                top_player['user_id'] != current_general_id):
+            # Assign General if top player has MORE wins than second place
+            if top_player['wins'] > second_player['wins']:
                 assignments['general'] = top_player['user_id']
         elif top_365_players and len(top_365_players) == 1:
-            # If only one player has wins, they become General if not already
-            current_general_id = current_roles.get('general', {}).get('user_id')
-            if top_365_players[0]['user_id'] != current_general_id:
-                assignments['general'] = top_365_players[0]['user_id']
+            # If only one player has wins, they become General
+            assignments['general'] = top_365_players[0]['user_id']
         
-        # 2. Commander: Player who has won most games in past 14 days and is not General/Commander
+        # 2. Commander: Player who has won most games in past 14 days and is not General
         if top_14_players:
-            general_id = assignments.get('general') or current_roles.get('general', {}).get('user_id')
-            current_commander_id = current_roles.get('commander', {}).get('user_id')
-            
+            general_id = assignments.get('general')
             commander_candidate = None
             
             # Special case: If General also has most 14-day wins, pick second place
             if (len(top_14_players) >= 2 and general_id and 
                 top_14_players[0]['user_id'] == general_id):
                 # Pick second place as Commander if they have more wins than 3rd place
-                # and are not already Commander
                 second_place = top_14_players[1]
                 if len(top_14_players) >= 3:
                     third_place = top_14_players[2]
-                    if (second_place['wins'] > third_place['wins'] and 
-                        second_place['user_id'] != current_commander_id):
+                    if second_place['wins'] > third_place['wins']:
                         commander_candidate = second_place
-                elif second_place['user_id'] != current_commander_id:
+                else:
                     # Only one other player besides General, they become Commander
                     commander_candidate = second_place
             
@@ -443,21 +434,19 @@ class Game1337Logic:
                 top_player = top_14_players[0]
                 second_player = top_14_players[1]
                 if (top_player['user_id'] != general_id and 
-                    top_player['user_id'] != current_commander_id and
                     top_player['wins'] > second_player['wins']):
                     commander_candidate = top_player
             elif (len(top_14_players) == 1 and 
-                  top_14_players[0]['user_id'] != general_id and
-                  top_14_players[0]['user_id'] != current_commander_id):
-                # Only one player with wins, they become Commander
+                  top_14_players[0]['user_id'] != general_id):
+                # Only one player with wins and not General, they become Commander
                 commander_candidate = top_14_players[0]
             
             if commander_candidate:
                 assignments['commander'] = commander_candidate['user_id']
         
         # 3. Sergeant: Today's winner who is not General or Commander
-        general_id = assignments.get('general') or current_roles.get('general', {}).get('user_id')
-        commander_id = assignments.get('commander') or current_roles.get('commander', {}).get('user_id')
+        general_id = assignments.get('general')
+        commander_id = assignments.get('commander')
         
         if (winner_today['user_id'] != general_id and 
             winner_today['user_id'] != commander_id):
@@ -573,19 +562,20 @@ class Game1337Logic:
                     # Find the appropriate user data for this role
                     user_to_display = None
                     
-                    if role_type == 'general':
-                        user_to_display = next((p for p in top_365_players if p['user_id'] == new_user_id), None)
-                    elif role_type == 'commander':
-                        user_to_display = next((p for p in top_14_players if p['user_id'] == new_user_id), None)
-                    elif role_type == 'sergeant' and winner_data['user_id'] == new_user_id:
-                        user_to_display = winner_data
-                    
-                    if user_to_display:
-                        role_name = role_type.capitalize()
-                        if user_to_display == winner_data:
-                            role_changes.append(f"New {role_name}: {user_to_display['username']}")
-                        else:
-                            role_changes.append(f"New {role_name}: {user_to_display['username']} ({user_to_display['wins']} wins)")
+                    if new_user_id:  # Only process if there's a new user being assigned
+                        if role_type == 'general':
+                            user_to_display = next((p for p in top_365_players if p['user_id'] == new_user_id), None)
+                        elif role_type == 'commander':
+                            user_to_display = next((p for p in top_14_players if p['user_id'] == new_user_id), None)
+                        elif role_type == 'sergeant' and winner_data['user_id'] == new_user_id:
+                            user_to_display = winner_data
+                        
+                        if user_to_display:
+                            role_name = role_type.capitalize()
+                            if user_to_display == winner_data:
+                                role_changes.append(f"New {role_name}: {user_to_display['username']}")
+                            else:
+                                role_changes.append(f"New {role_name}: {user_to_display['username']} ({user_to_display['wins']} wins)")
             
             if role_changes:
                 message_lines.append("")
