@@ -491,17 +491,27 @@ class DatabaseManager:
                 """, (user_id,))
             elif days:
                 cursor.execute("""
-                    SELECT user_id, username, COUNT(*) as wins, MAX(game_date) as last_win
-                    FROM game_1337_winners 
-                    WHERE game_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-                    GROUP BY user_id, username
+                    SELECT w.user_id, 
+                           (SELECT username FROM game_1337_winners 
+                            WHERE user_id = w.user_id 
+                            ORDER BY game_date DESC LIMIT 1) as latest_username,
+                           COUNT(*) as wins, 
+                           MAX(w.game_date) as last_win
+                    FROM game_1337_winners w
+                    WHERE w.game_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    GROUP BY w.user_id
                     ORDER BY wins DESC, last_win DESC
                 """, (days,))
             else:
                 cursor.execute("""
-                    SELECT user_id, username, COUNT(*) as wins, MAX(game_date) as last_win
-                    FROM game_1337_winners 
-                    GROUP BY user_id, username
+                    SELECT w.user_id,
+                           (SELECT username FROM game_1337_winners 
+                            WHERE user_id = w.user_id 
+                            ORDER BY game_date DESC LIMIT 1) as latest_username,
+                           COUNT(*) as wins, 
+                           MAX(w.game_date) as last_win
+                    FROM game_1337_winners w
+                    GROUP BY w.user_id
                     ORDER BY wins DESC, last_win DESC
                 """)
             
@@ -834,13 +844,16 @@ class DatabaseManager:
                     }
             else:
                 cursor.execute("""
-                    SELECT requester_user_id, requester_username,
+                    SELECT f.requester_user_id,
+                           (SELECT requester_username FROM factcheck_requests 
+                            WHERE requester_user_id = f.requester_user_id 
+                            ORDER BY created_at DESC LIMIT 1) as latest_username,
                            COUNT(*) as total_requests,
-                           AVG(score) as avg_score
-                    FROM factcheck_requests 
-                    WHERE request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-                      AND score IS NOT NULL
-                    GROUP BY requester_user_id, requester_username
+                           AVG(f.score) as avg_score
+                    FROM factcheck_requests f
+                    WHERE f.request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                      AND f.score IS NOT NULL
+                    GROUP BY f.requester_user_id
                     ORDER BY total_requests DESC
                 """, (days,))
                 
