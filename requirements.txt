@@ -1,4 +1,4 @@
-discord.py==2.5.2
+discord.py==2.6.2
 mariadb==1.1.13
 python-dotenv==1.1.1
 asyncio-mqtt==0.16.2
