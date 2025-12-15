@@ -10,8 +10,6 @@
   "prConcurrentLimit": 30,
   "rebaseWhen": "behind-base-branch",
 
-  "schedule": ["before 5am on monday"],
-
   "automergeType": "branch",
   "major": { "automerge": false },
   "minor": { "automerge": true },
@@ -19,8 +17,7 @@
 
   "lockFileMaintenance": {
     "enabled": true,
-    "automerge": true,
-    "schedule": ["before 5am on monday"]
+    "automerge": true
   },
   "packageRules": [
     {
