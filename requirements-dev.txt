@@ -1,4 +1,7 @@
 -r requirements.txt
 pytest>=9.0
 pytest-asyncio>=1.3
-dpytest==0.7.0
+# Pinned to upstream master sha that includes the fix for discord.py 2.7's
+# role `colors` payload (commit 4136090). Switch back to a tagged release
+# once dpytest publishes 0.7.1+ to PyPI.
+dpytest @ git+https://github.com/CraftSpider/dpytest.git@4136090d5163bfa5cfba7d97b9961a2f1df7a1ec
