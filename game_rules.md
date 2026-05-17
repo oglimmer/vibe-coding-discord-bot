@@ -49,12 +49,12 @@ Early bird bets accept multiple timestamp formats:
 ### 3-Second Penalty for Early Bird Bets
 - **Purpose**: Prevents early bird bets from having an unfair advantage
 - **Rule**: Early bird bets can only win if they are more than 3 seconds apart from the closest regular bet
-- **Example**: 
+- **Example**:
   - Early bird at 13:37:25, Regular at 13:37:28, Win time at 13:37:30
   - Regular is closer (2s vs 5s from win time)
   - **Result**: Regular bet wins (closer to win time)
 
-- **Example with Penalty**: 
+- **Example with Penalty**:
   - Early bird at 13:37:28, Regular at 13:37:25, Win time at 13:37:30
   - Early bird is closer (2s vs 5s from win time), but only 3s apart from regular
   - **Result**: Regular bet wins (early bird closer but within 3s of regular)
@@ -83,7 +83,7 @@ The game includes a hierarchical role system based on winning performance:
 #### 3. General Role
 - **Assignment**: Player with most wins in the last 365 days
 - **Duration**: Until next 365-day period calculation
-- **Privileges**: 
+- **Privileges**:
   - Recognition as long-term champion
   - Special announcements when placing bets
   - Prestige status
@@ -168,4 +168,4 @@ The game includes a hierarchical role system based on winning performance:
 
 ---
 
-*The 1337 game combines precision timing, strategic planning, and community competition in a daily challenge that rewards both skill and consistency.* 
+*The 1337 game combines precision timing, strategic planning, and community competition in a daily challenge that rewards both skill and consistency.*

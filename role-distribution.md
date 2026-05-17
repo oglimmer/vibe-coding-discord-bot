@@ -30,15 +30,15 @@ Game 1337 implements a hierarchical role system with three tiers: Sergeant, Comm
 The core assignment logic is handled by `determine_new_role_assignments()` in `game/game_1337_logic.py`:
 
 ```python
-def determine_new_role_assignments(self, winner_today: Dict[str, Any], 
+def determine_new_role_assignments(self, winner_today: Dict[str, Any],
                                   current_roles: Dict[str, Any],
                                   guild_id: int) -> Dict[str, int]:
     assignments = {}
-    
+
     # Get top players for different time periods
     top_365_players = self.get_winner_stats(days=365)
     top_14_players = self.get_winner_stats(days=14)
-    
+
     # 1. General: Top 365-day player who is not already General
     if top_365_players:
         current_general_id = current_roles.get('general', {}).get('user_id')
@@ -46,39 +46,39 @@ def determine_new_role_assignments(self, winner_today: Dict[str, Any],
             if player['user_id'] != current_general_id:
                 assignments['general'] = player['user_id']
                 break
-    
+
     # 2. Commander: Top 14-day player who is not General or already Commander
     if top_14_players:
         general_id = assignments.get('general') or current_roles.get('general', {}).get('user_id')
         current_commander_id = current_roles.get('commander', {}).get('user_id')
-        
+
         # Find the best candidate for Commander
         commander_candidate = None
         for player in top_14_players:
             if player['user_id'] != general_id and player['user_id'] != current_commander_id:
                 commander_candidate = player
                 break
-        
+
         # Special case: If General also has most 14-day wins, pick second place
-        if (top_14_players and general_id and 
-            top_14_players[0]['user_id'] == general_id and 
+        if (top_14_players and general_id and
+            top_14_players[0]['user_id'] == general_id and
             len(top_14_players) > 1):
             # Pick second place as Commander if they're not already Commander
             second_place = top_14_players[1]
             if second_place['user_id'] != current_commander_id:
                 commander_candidate = second_place
-        
+
         if commander_candidate:
             assignments['commander'] = commander_candidate['user_id']
-    
+
     # 3. Sergeant: Today's winner who is not General or Commander
     general_id = assignments.get('general') or current_roles.get('general', {}).get('user_id')
     commander_id = assignments.get('commander') or current_roles.get('commander', {}).get('user_id')
-    
-    if (winner_today['user_id'] != general_id and 
+
+    if (winner_today['user_id'] != general_id and
         winner_today['user_id'] != commander_id):
         assignments['sergeant'] = winner_today['user_id']
-    
+
     return assignments
 ```
 
@@ -128,7 +128,7 @@ Role updates happen automatically through the `_update_guild_roles()` method in 
 ### Configuration
 Role IDs are configured through environment variables in `config.py`:
 - `SERGEANT_ROLE_ID` - Discord role ID for Sergeant
-- `COMMANDER_ROLE_ID` - Discord role ID for Commander  
+- `COMMANDER_ROLE_ID` - Discord role ID for Commander
 - `GENERAL_ROLE_ID` - Discord role ID for General
 
 ## Automatic Updates

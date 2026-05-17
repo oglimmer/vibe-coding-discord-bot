@@ -12,13 +12,14 @@ os.environ.setdefault("DB_PASSWORD", "test")
 
 import discord
 import discord.ext.test as dpytest
-import pytest
 import pytest_asyncio
 from discord.ext import commands
 
 from config import Config
 from commands.bet_1337_command import setup as setup_bet_1337_command
-from commands.bet_1337_early_bird_command import setup as setup_bet_1337_early_bird_command
+from commands.bet_1337_early_bird_command import (
+    setup as setup_bet_1337_early_bird_command,
+)
 from commands.game_1337_command import setup as setup_game_1337_command
 from game.game_1337_logic import Game1337Logic
 
@@ -33,33 +34,58 @@ class FakeDB:
 
     # --- bets -------------------------------------------------------------
 
-    def save_1337_bet(self, user_id, username, play_time, game_date,
-                      bet_type="regular", server_id=None, channel_id=None):
+    def save_1337_bet(
+        self,
+        user_id,
+        username,
+        play_time,
+        game_date,
+        bet_type="regular",
+        server_id=None,
+        channel_id=None,
+    ):
         if any(w["game_date"] == game_date for w in self.winners):
             return "game_closed"
         for b in self.bets:
             if b["user_id"] == user_id and b["game_date"] == game_date:
                 b.update(play_time=play_time, bet_type=bet_type, username=username)
                 return "saved"
-        self.bets.append({
-            "user_id": user_id, "username": username, "play_time": play_time,
-            "game_date": game_date, "bet_type": bet_type,
-            "server_id": server_id, "channel_id": channel_id,
-        })
+        self.bets.append(
+            {
+                "user_id": user_id,
+                "username": username,
+                "play_time": play_time,
+                "game_date": game_date,
+                "bet_type": bet_type,
+                "server_id": server_id,
+                "channel_id": channel_id,
+            }
+        )
         return "saved"
 
     def get_user_bet(self, user_id, game_date):
         for b in self.bets:
             if b["user_id"] == user_id and b["game_date"] == game_date:
-                return {k: b[k] for k in ("user_id", "username", "play_time", "bet_type")}
+                return {
+                    k: b[k] for k in ("user_id", "username", "play_time", "bet_type")
+                }
         return None
 
     def get_daily_bets(self, game_date):
         rows = [b for b in self.bets if b["game_date"] == game_date]
         rows.sort(key=lambda b: b["play_time"])
         return [
-            {k: b.get(k) for k in (
-                "user_id", "username", "play_time", "bet_type", "server_id", "channel_id")}
+            {
+                k: b.get(k)
+                for k in (
+                    "user_id",
+                    "username",
+                    "play_time",
+                    "bet_type",
+                    "server_id",
+                    "channel_id",
+                )
+            }
             for b in rows
         ]
 
@@ -74,34 +100,54 @@ class FakeDB:
         if picked is None or picked.get("catastrophic_event"):
             return picked
 
-        self.winners.append({
-            "user_id": picked["user_id"],
-            "username": picked["username"],
-            "game_date": game_date,
-            "win_time": win_time,
-            "play_time": picked["play_time"],
-            "bet_type": picked["bet_type"],
-            "millisecond_diff": picked["millisecond_diff"],
-            "server_id": picked.get("server_id"),
-        })
+        self.winners.append(
+            {
+                "user_id": picked["user_id"],
+                "username": picked["username"],
+                "game_date": game_date,
+                "win_time": win_time,
+                "play_time": picked["play_time"],
+                "bet_type": picked["bet_type"],
+                "millisecond_diff": picked["millisecond_diff"],
+                "server_id": picked.get("server_id"),
+            }
+        )
         return picked
 
-    def add_historical_winner(self, user_id, username, game_date,
-                              bet_type="regular", millisecond_diff=0):
+    def add_historical_winner(
+        self, user_id, username, game_date, bet_type="regular", millisecond_diff=0
+    ):
         """Test helper to seed prior wins so role transitions can be exercised."""
-        win_time = datetime.combine(game_date, datetime.min.time()).replace(hour=13, minute=37)
-        self.winners.append({
-            "user_id": user_id, "username": username, "game_date": game_date,
-            "win_time": win_time, "play_time": win_time,
-            "bet_type": bet_type, "millisecond_diff": millisecond_diff,
-            "server_id": None,
-        })
+        win_time = datetime.combine(game_date, datetime.min.time()).replace(
+            hour=13, minute=37
+        )
+        self.winners.append(
+            {
+                "user_id": user_id,
+                "username": username,
+                "game_date": game_date,
+                "win_time": win_time,
+                "play_time": win_time,
+                "bet_type": bet_type,
+                "millisecond_diff": millisecond_diff,
+                "server_id": None,
+            }
+        )
 
     def get_daily_winner(self, game_date):
         for w in self.winners:
             if w["game_date"] == game_date:
-                return {k: w[k] for k in (
-                    "user_id", "username", "win_time", "play_time", "bet_type", "millisecond_diff")}
+                return {
+                    k: w[k]
+                    for k in (
+                        "user_id",
+                        "username",
+                        "win_time",
+                        "play_time",
+                        "bet_type",
+                        "millisecond_diff",
+                    )
+                }
         return None
 
     def get_winner_stats(self, user_id=None, days=None):
@@ -116,14 +162,21 @@ class FakeDB:
         agg = {}
         for w in winners:
             uid = w["user_id"]
-            entry = agg.setdefault(uid, {"wins": 0, "last_win": w["game_date"], "username": w["username"]})
+            entry = agg.setdefault(
+                uid, {"wins": 0, "last_win": w["game_date"], "username": w["username"]}
+            )
             entry["wins"] += 1
             if w["game_date"] >= entry["last_win"]:
                 entry["last_win"] = w["game_date"]
                 entry["username"] = w["username"]
 
         result = [
-            {"user_id": uid, "username": v["username"], "wins": v["wins"], "last_win": v["last_win"]}
+            {
+                "user_id": uid,
+                "username": v["username"],
+                "wins": v["wins"],
+                "last_win": v["last_win"],
+            }
             for uid, v in agg.items()
         ]
         result.sort(key=lambda r: (-r["wins"], -r["last_win"].toordinal()))
@@ -132,7 +185,10 @@ class FakeDB:
     # --- role assignments -------------------------------------------------
 
     def set_role_assignment(self, guild_id, user_id, role_type, role_id):
-        self.role_assignments[(guild_id, role_type)] = {"user_id": user_id, "role_id": role_id}
+        self.role_assignments[(guild_id, role_type)] = {
+            "user_id": user_id,
+            "role_id": role_id,
+        }
         return True
 
     def get_role_assignment(self, guild_id, role_type):
@@ -144,7 +200,8 @@ class FakeDB:
     def get_all_role_assignments(self, guild_id):
         return [
             {"user_id": v["user_id"], "role_type": rt, "role_id": v["role_id"]}
-            for (gid, rt), v in self.role_assignments.items() if gid == guild_id
+            for (gid, rt), v in self.role_assignments.items()
+            if gid == guild_id
         ]
 
     def remove_role_assignment(self, guild_id, role_type):
@@ -191,7 +248,8 @@ async def bot_setup(monkeypatch):
     # Bets are placed via /1337 which validates against game time. We don't
     # care about the wall clock during tests, so disable the cutoff guard.
     monkeypatch.setattr(
-        Game1337Logic, "is_game_time_passed",
+        Game1337Logic,
+        "is_game_time_passed",
         lambda self, current_time=None: False,
     )
 

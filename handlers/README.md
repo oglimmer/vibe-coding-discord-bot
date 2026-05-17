@@ -97,7 +97,7 @@ Users can interact with the fact-check feature via these commands:
 ### Score Scale
 The AI provides scores on a 0-9 scale:
 - **0-2**: Definitiv falsch/irreführend
-- **3-4**: Größtenteils falsch mit wenigen korrekten Elementen  
+- **3-4**: Größtenteils falsch mit wenigen korrekten Elementen
 - **5-6**: Gemischt, sowohl korrekte als auch falsche Elemente
 - **7-8**: Größtenteils korrekt mit kleineren Ungenauigkeiten
 - **9**: Vollständig korrekt und faktisch
