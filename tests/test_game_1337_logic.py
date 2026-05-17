@@ -280,37 +280,56 @@ class TestGame1337Logic(unittest.TestCase):
 
     def test_validate_bet_placement_success(self):
         """Test successful bet placement validation"""
+        self.db_manager.get_daily_winner.return_value = None
         self.db_manager.get_user_bet.return_value = None  # No existing bet
-        
+
         with patch('game.game_1337_logic.Config.GAME_START_TIME', '13:37:00.000'):
             current_time = datetime(2023, 12, 25, 13, 30, 0)  # Before deadline
             result = self.logic.validate_bet_placement(12345, current_time)
-            
+
             self.assertTrue(result['valid'])
 
     def test_validate_bet_placement_game_passed(self):
         """Test bet placement validation when game time has passed"""
+        self.db_manager.get_daily_winner.return_value = None
         with patch('game.game_1337_logic.Config.GAME_START_TIME', '13:37:00.000'):
             current_time = datetime(2023, 12, 25, 13, 40, 0)  # After deadline
             result = self.logic.validate_bet_placement(12345, current_time)
-            
+
             self.assertFalse(result['valid'])
             self.assertEqual(result['reason'], 'game_time_passed')
 
     def test_validate_bet_placement_existing_bet(self):
         """Test bet placement validation when user already has a bet"""
+        self.db_manager.get_daily_winner.return_value = None
         existing_bet = {
             'bet_type': 'regular',
             'play_time': datetime(2023, 12, 25, 13, 30, 0)
         }
         self.db_manager.get_user_bet.return_value = existing_bet
-        
+
         with patch('game.game_1337_logic.Config.GAME_START_TIME', '13:37:00.000'):
             current_time = datetime(2023, 12, 25, 13, 30, 0)
             result = self.logic.validate_bet_placement(12345, current_time)
-            
+
             self.assertFalse(result['valid'])
             self.assertEqual(result['reason'], 'existing_bet')
+
+    def test_validate_bet_placement_game_closed(self):
+        """Validation must reject once a winner has been recorded for today,
+        even before the 1-minute buffer expires."""
+        self.db_manager.get_daily_winner.return_value = {
+            'user_id': 999, 'username': 'SomeoneElse'
+        }
+        with patch('game.game_1337_logic.Config.GAME_START_TIME', '13:37:00.000'):
+            # Inside the 1-minute buffer (would pass the old check)
+            current_time = datetime(2023, 12, 25, 13, 37, 45)
+            result = self.logic.validate_bet_placement(12345, current_time)
+
+            self.assertFalse(result['valid'])
+            self.assertEqual(result['reason'], 'game_closed')
+            # get_user_bet must not even be consulted once we know the game is over
+            self.db_manager.get_user_bet.assert_not_called()
 
     def test_validate_early_bird_timestamp_success(self):
         """Test successful early bird timestamp validation"""

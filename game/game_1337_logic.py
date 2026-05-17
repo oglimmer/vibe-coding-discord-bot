@@ -153,18 +153,14 @@ class Game1337Logic:
         """Calculate millisecond difference between bet time and win time"""
         return int((win_time - bet_time).total_seconds() * 1000)
 
-    def determine_winner(self, game_date: date, win_time: datetime) -> Optional[Dict[str, Any]]:
-        """
-        Determine the winner for a given game date and win time.
-        Returns the winner dict or None if no winner/catastrophic event.
-        """
-        logger.info(f"Determining winner for {game_date}, win time: {self.format_time_with_ms(win_time)}")
+    def _select_winner_from_bets(self, daily_bets: List[Dict[str, Any]], win_time: datetime) -> Optional[Dict[str, Any]]:
+        """Pure selection: pick a winner from an already-loaded list of bets.
 
-        daily_bets = self.db_manager.get_daily_bets(game_date)
-        logger.debug(f"Found {len(daily_bets)} total bets for {game_date}")
-
+        Returns None, a catastrophic-event marker, or the winner dict
+        (with millisecond_diff and win_time populated). No DB access.
+        """
         valid_bets = [bet for bet in daily_bets if bet['play_time'] <= win_time]
-        logger.debug(f"Found {len(valid_bets)} valid bets (≤ win time)")
+        logger.debug(f"Found {len(valid_bets)} valid bets (≤ win time) out of {len(daily_bets)} total")
 
         for bet in daily_bets:
             valid = "✓" if bet['play_time'] <= win_time else "✗"
@@ -173,7 +169,7 @@ class Game1337Logic:
             )
 
         if not valid_bets:
-            logger.info(f"No valid bets for {game_date}")
+            logger.info("No valid bets")
             return None
 
         if len(valid_bets) == 1:
@@ -185,7 +181,6 @@ class Game1337Logic:
                 logger.info("No winner determined")
                 return None
 
-        # Check for catastrophic event (identical times)
         identical_times = [bet for bet in valid_bets if bet['play_time'] == winner['play_time']]
         if len(identical_times) > 1:
             logger.info(
@@ -200,12 +195,29 @@ class Game1337Logic:
             f"({winner['bet_type']}) - {millisecond_diff}ms before win time"
         )
 
-        # Add calculated difference to winner data
         winner_data = winner.copy()
         winner_data['millisecond_diff'] = millisecond_diff
         winner_data['win_time'] = win_time
-        
         return winner_data
+
+    def determine_winner(self, game_date: date, win_time: datetime) -> Optional[Dict[str, Any]]:
+        """Non-transactional read + selection. Kept for tests and ad-hoc use.
+
+        Production should call determine_and_save_winner, which holds a lock
+        across the read and the winner insert to keep /stats consistent with
+        the announced winner.
+        """
+        logger.info(f"Determining winner for {game_date}, win time: {self.format_time_with_ms(win_time)}")
+        daily_bets = self.db_manager.get_daily_bets(game_date)
+        logger.debug(f"Found {len(daily_bets)} total bets for {game_date}")
+        return self._select_winner_from_bets(daily_bets, win_time)
+
+    def determine_and_save_winner(self, game_date: date, win_time: datetime) -> Optional[Dict[str, Any]]:
+        """Atomic read + select + persist. Use this from the scheduler path."""
+        logger.info(f"Atomically deciding winner for {game_date}, win time: {self.format_time_with_ms(win_time)}")
+        return self.db_manager.decide_winner_atomically(
+            game_date, win_time, self._select_winner_from_bets
+        )
 
     def get_milliseconds_since_midnight(self, dt: datetime) -> int:
         """Get milliseconds since midnight for a datetime object"""
@@ -268,19 +280,6 @@ class Game1337Logic:
             logger.debug(f"Winner: {closest_regular['username']} (early_bird closer but within 3s of regular)")
             return closest_regular
 
-    def save_winner(self, winner_data: Dict[str, Any]) -> bool:
-        """Save the winner to the database"""
-        return self.db_manager.save_1337_winner(
-            winner_data['user_id'],
-            winner_data['username'],
-            winner_data['win_time'].date(),
-            winner_data['win_time'],
-            winner_data['play_time'],
-            winner_data['bet_type'],
-            winner_data['millisecond_diff'],
-            winner_data['server_id']
-        )
-
     def validate_bet_placement(self, user_id: int, current_time: Optional[datetime] = None) -> Dict[str, Any]:
         """
         Validate if a bet can be placed.
@@ -288,9 +287,19 @@ class Game1337Logic:
         """
         if current_time is None:
             current_time = datetime.now()
-        
+
         game_date = self.get_game_date()
-        
+
+        # Soft pre-check: if the winner has already been recorded, the day is
+        # over regardless of the 1-minute buffer. The hard guarantee lives in
+        # save_1337_bet's transactional gap lock; this is the friendly message.
+        if self.db_manager.get_daily_winner(game_date):
+            return {
+                'valid': False,
+                'reason': 'game_closed',
+                'message': "❌ **The game is over for today.** Try again tomorrow!"
+            }
+
         # Check if game time has passed
         if self.is_game_time_passed(current_time):
             return {
@@ -298,7 +307,7 @@ class Game1337Logic:
                 'reason': 'game_time_passed',
                 'message': "❌ **Game time has passed!** The 1337 window is closed for today. Try again tomorrow!"
             }
-        
+
         # Check if user already has a bet
         existing_bet = self.db_manager.get_user_bet(user_id, game_date)
         if existing_bet:
@@ -347,9 +356,13 @@ class Game1337Logic:
             'timestamp': parsed_timestamp
         }
 
-    def save_bet(self, user_id: int, username: str, play_time: datetime, bet_type: str, 
-                 guild_id: int, channel_id: int) -> bool:
-        """Save a bet to the database"""
+    def save_bet(self, user_id: int, username: str, play_time: datetime, bet_type: str,
+                 guild_id: int, channel_id: int) -> str:
+        """Save a bet. Returns 'saved' | 'game_closed' | 'error'.
+
+        'game_closed' means the bet lost a race against winner determination:
+        a winner row was written between validate_bet_placement and this call.
+        """
         game_date = self.get_game_date()
         return self.db_manager.save_1337_bet(
             user_id, username, play_time, game_date, bet_type, guild_id, channel_id
