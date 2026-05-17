@@ -54,7 +54,7 @@ class Bet1337EarlyBirdCommand(commands.Cog):
             play_time = timestamp_validation['timestamp']
             
             # Save the bet
-            success = self.game_logic.save_bet(
+            status = self.game_logic.save_bet(
                 interaction.user.id,
                 interaction.user.display_name,
                 play_time,
@@ -63,7 +63,7 @@ class Bet1337EarlyBirdCommand(commands.Cog):
                 interaction.channel_id
             )
 
-            if success:
+            if status == 'saved':
                 # Check if user is General and announce
                 if Config.GENERAL_ROLE_ID:
                     general_role = interaction.guild.get_role(Config.GENERAL_ROLE_ID)
@@ -72,6 +72,11 @@ class Bet1337EarlyBirdCommand(commands.Cog):
 
                 await interaction.response.send_message(
                     f"✅ **Early bird bet scheduled!** Your time: {self.game_logic.format_time_with_ms(play_time)}\nGood luck! 🍀",
+                    ephemeral=True
+                )
+            elif status == 'game_closed':
+                await interaction.response.send_message(
+                    "❌ **The game just ended.** A winner was determined a moment ago — try again tomorrow!",
                     ephemeral=True
                 )
             else:

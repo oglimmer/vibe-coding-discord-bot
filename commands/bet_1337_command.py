@@ -49,7 +49,7 @@ class Bet1337Command(commands.Cog):
             play_time = datetime.now()
             logger.debug(f"Current time: {self.game_logic.format_time_with_ms(play_time)}")
 
-            success = self.game_logic.save_bet(
+            status = self.game_logic.save_bet(
                 interaction.user.id,
                 interaction.user.display_name,
                 play_time,
@@ -58,7 +58,7 @@ class Bet1337Command(commands.Cog):
                 interaction.channel_id
             )
 
-            if success:
+            if status == 'saved':
                 logger.info(f"Regular bet saved successfully for {interaction.user.display_name} at {self.game_logic.format_time_with_ms(play_time)}")
 
                 # Check if user is General and announce
@@ -70,6 +70,12 @@ class Bet1337Command(commands.Cog):
 
                 await interaction.response.send_message(
                     f"✅ **Bet placed!** Your time: {self.game_logic.format_time_with_ms(play_time)}\nGood luck! 🍀",
+                    ephemeral=True
+                )
+            elif status == 'game_closed':
+                logger.info(f"Bet from {interaction.user.display_name} lost race with winner determination")
+                await interaction.response.send_message(
+                    "❌ **The game just ended.** A winner was determined a moment ago — try again tomorrow!",
                     ephemeral=True
                 )
             else:

@@ -128,31 +128,8 @@ class Game1337Command(commands.Cog):
                 time_diff = (actual_time - win_time).total_seconds() * 1000  # Convert to milliseconds
                 logger.info(f"Winner determination triggered at: {self.game_logic.format_time_with_ms(actual_time)} (diff: {time_diff:.1f}ms)")
 
-            try:
-                logger.debug(f"Determining winner for {game_date} at {win_time}")
-                winner_result = self.game_logic.determine_winner(game_date, win_time)
-                logger.debug(f"Winner result: {winner_result}")
-            except Exception as e:
-                logger.error(f"Error determining winner: {e}", exc_info=True)
-                return
-
-            if not winner_result:
-                logger.info(f"No winner for {game_date}")
-                try:
-                    await self._announce_no_winner()
-                except Exception as e:
-                    logger.error(f"Error announcing no winner: {e}", exc_info=True)
-                return
-
-            if winner_result.get('catastrophic_event'):
-                logger.info(f"Catastrophic event detected for {game_date}")
-                try:
-                    await self._announce_catastrophic_event()
-                except Exception as e:
-                    logger.error(f"Error announcing catastrophic event: {e}", exc_info=True)
-                return
-
-            # Get current role holders before updating roles
+            # Snapshot current role holders BEFORE the atomic decision so the
+            # announcement message reflects the role state at decision time.
             current_role_holders = {}
             try:
                 logger.debug(f"Getting current role holders for {len(self.bot.guilds)} guilds")
@@ -173,26 +150,46 @@ class Game1337Command(commands.Cog):
                 logger.error(f"Error getting current role holders: {e}", exc_info=True)
                 current_role_holders = {}
 
-            # Save winner to database
+            # Atomic: lock the winner row, read bets, pick + persist. The same
+            # lock blocks any concurrent bet insert (see database.save_1337_bet),
+            # so the persisted winner is computed from the same set of bets
+            # that /stats will later display.
             try:
-                logger.debug(f"Saving winner to database: {winner_result}")
-                success = self.game_logic.save_winner(winner_result)
-                logger.debug(f"Save winner result: {success}")
+                logger.debug(f"Atomically deciding winner for {game_date} at {win_time}")
+                winner_result = self.game_logic.determine_and_save_winner(game_date, win_time)
+                logger.debug(f"Winner result: {winner_result}")
             except Exception as e:
-                logger.error(f"Error saving winner to database: {e}", exc_info=True)
-                success = False
+                logger.error(f"Error in atomic winner decision: {e}", exc_info=True)
+                return
 
-            if success:
-                logger.info(f"Winner saved to database successfully")
+            if winner_result and winner_result.get('already_decided'):
+                logger.info(f"Winner for {game_date} already decided in a prior run; skipping announcement")
+                return
+
+            if not winner_result:
+                logger.info(f"No winner for {game_date}")
                 try:
-                    logger.debug("Updating roles...")
-                    await self._update_roles()
-                    logger.debug("Announcing winner...")
-                    await self._announce_winner(winner_result, current_role_holders)
+                    await self._announce_no_winner()
                 except Exception as e:
-                    logger.error(f"Error in post-save operations: {e}", exc_info=True)
-            else:
-                logger.error(f"Failed to save winner to database")
+                    logger.error(f"Error announcing no winner: {e}", exc_info=True)
+                return
+
+            if winner_result.get('catastrophic_event'):
+                logger.info(f"Catastrophic event detected for {game_date}")
+                try:
+                    await self._announce_catastrophic_event()
+                except Exception as e:
+                    logger.error(f"Error announcing catastrophic event: {e}", exc_info=True)
+                return
+
+            logger.info(f"Winner saved to database successfully")
+            try:
+                logger.debug("Updating roles...")
+                await self._update_roles()
+                logger.debug("Announcing winner...")
+                await self._announce_winner(winner_result, current_role_holders)
+            except Exception as e:
+                logger.error(f"Error in post-save operations: {e}", exc_info=True)
 
             logger.info(f"Winner determination complete for {game_date}: {winner_result.get('username', 'Unknown')}")
         

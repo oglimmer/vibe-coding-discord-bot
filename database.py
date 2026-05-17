@@ -363,10 +363,34 @@ class DatabaseManager:
                 connection.close()
     
     def save_1337_bet(self, user_id, username, play_time, game_date, bet_type='regular', server_id=None, channel_id=None):
+        """Save a bet, refusing if a winner has already been determined for game_date.
+
+        Returns: 'saved' | 'game_closed' | 'error'.
+
+        The SELECT ... FOR UPDATE on game_1337_winners(game_date) acquires a
+        next-key gap lock when the row is absent, which serializes against the
+        winner-determination transaction in decide_winner_atomically. Either
+        the winner row is already visible (we reject), or our bet INSERT
+        commits first and the winner-determination path observes our row.
+        """
         connection = None
         try:
             connection = self._get_connection()
+            connection.autocommit = False
             cursor = connection.cursor()
+
+            cursor.execute(
+                "SELECT 1 FROM game_1337_winners WHERE game_date = ? FOR UPDATE",
+                (game_date,),
+            )
+            if cursor.fetchone() is not None:
+                connection.rollback()
+                logger.info(
+                    f"Bet rejected for {username} ({user_id}) on {game_date}: "
+                    f"winner already determined"
+                )
+                return 'game_closed'
+
             cursor.execute("""
                 INSERT INTO game_1337_bets (user_id, username, play_time, game_date, bet_type, server_id, channel_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -375,13 +399,18 @@ class DatabaseManager:
                 bet_type = VALUES(bet_type),
                 username = VALUES(username)
             """, (user_id, username, play_time, game_date, bet_type, server_id, channel_id))
-            
+
             connection.commit()
             logger.info(f"Saved 1337 bet for user {username} ({user_id}) on {game_date}")
-            return True
+            return 'saved'
         except mariadb.Error as e:
+            if connection:
+                try:
+                    connection.rollback()
+                except mariadb.Error:
+                    pass
             logger.error(f"Error saving 1337 bet: {e}")
-            return False
+            return 'error'
         finally:
             if connection:
                 connection.close()
@@ -470,7 +499,96 @@ class DatabaseManager:
         finally:
             if connection:
                 connection.close()
-    
+
+    def decide_winner_atomically(self, game_date, win_time, pick_winner):
+        """Atomically lock today's winner row, read bets, pick a winner, and persist.
+
+        Holds a SELECT ... FOR UPDATE gap lock on game_1337_winners(game_date)
+        across reading bets and inserting the winner. Bet inserts in
+        save_1337_bet take the same lock, so no bet can land between the read
+        and the winner insert: either the bet commits first and we observe it,
+        or it blocks until we commit and then rejects with 'game_closed'.
+
+        pick_winner(bets, win_time) -> Optional[dict]
+            Returns one of:
+              - None for "no eligible winner today"
+              - {'catastrophic_event': True, 'identical_count': N}
+              - winner dict with keys: user_id, username, play_time, bet_type,
+                millisecond_diff, server_id (server_id may be None)
+
+        Returns the picker's result, or None if a winner was already recorded
+        (idempotent re-entry).
+        """
+        connection = None
+        try:
+            connection = self._get_connection()
+            connection.autocommit = False
+            cursor = connection.cursor()
+
+            cursor.execute(
+                "SELECT 1 FROM game_1337_winners WHERE game_date = ? FOR UPDATE",
+                (game_date,),
+            )
+            if cursor.fetchone() is not None:
+                connection.rollback()
+                logger.info(f"Winner already recorded for {game_date}; skipping re-decision")
+                # Distinct from "no eligible bets" — the caller must not
+                # announce "no winner today" in this case.
+                return {'already_decided': True}
+
+            cursor.execute("""
+                SELECT user_id, username, play_time, bet_type, server_id, channel_id
+                FROM game_1337_bets
+                WHERE game_date = ?
+                ORDER BY play_time ASC
+            """, (game_date,))
+            bets = [
+                {
+                    'user_id': row[0],
+                    'username': row[1],
+                    'play_time': row[2],
+                    'bet_type': row[3],
+                    'server_id': row[4],
+                    'channel_id': row[5],
+                }
+                for row in cursor.fetchall()
+            ]
+
+            picked = pick_winner(bets, win_time)
+
+            if picked is None or picked.get('catastrophic_event'):
+                connection.rollback()
+                return picked
+
+            cursor.execute("""
+                INSERT INTO game_1337_winners
+                    (user_id, username, game_date, win_time, play_time,
+                     bet_type, millisecond_diff, server_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                picked['user_id'], picked['username'], game_date,
+                win_time, picked['play_time'], picked['bet_type'],
+                picked['millisecond_diff'], picked.get('server_id'),
+            ))
+            connection.commit()
+            logger.info(
+                f"Atomically decided 1337 winner for {game_date}: "
+                f"{picked['username']} ({picked['user_id']})"
+            )
+            return picked
+
+        except mariadb.Error as e:
+            if connection:
+                try:
+                    connection.rollback()
+                except mariadb.Error:
+                    pass
+            logger.error(f"Error in decide_winner_atomically: {e}")
+            raise
+        finally:
+            if connection:
+                connection.close()
+
     def get_winner_stats(self, user_id=None, days=None):
         connection = None
         try:
