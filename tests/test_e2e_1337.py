@@ -16,13 +16,9 @@ from tests.conftest import FakeInteraction
 
 # TODO: re-enable once dpytest supports discord.py 2.7's gradient role colors
 # (FakeHttp.create_role currently rejects the `colors` kwarg).
-pytest.skip(
-    "dpytest 0.7.0 incompatible with discord.py 2.7 role color payload",
-    allow_module_level=True,
-)
+_SKIP_REASON = "dpytest 0.7.0 incompatible with discord.py 2.7 role color payload"
 
-
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.skip(reason=_SKIP_REASON)]
 
 
 async def _place_bet(bet_cog, member, guild, channel):
