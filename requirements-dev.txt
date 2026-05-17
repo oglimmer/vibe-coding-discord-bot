@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest>=9.0
+pytest-asyncio>=1.3
+dpytest==0.7.0

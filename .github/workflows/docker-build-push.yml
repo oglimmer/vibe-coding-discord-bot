@@ -31,7 +31,9 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install system dependencies
         run: |
@@ -41,11 +43,15 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
-      - name: Run all tests
+      - name: Run unittest suite
         run: |
           python -m unittest discover tests -v
+
+      - name: Run pytest e2e suite
+        run: |
+          python -m pytest tests/test_e2e_1337.py -v
 
       - name: Test syntax check
         run: |
