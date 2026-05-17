@@ -21,7 +21,7 @@ class MessageHandler:
 
         # German greetings
         german_greetings = [
-            "guten morgen", "moin",
+            "guten morgen", "gumo", "moin",
             "servus", "hallo", "hi", "hey", "tach", "tag",
             "guten tag", "guten abend", "n8", "nacht",
             "gute nacht", "tschüss", "ciao", "bye", "tschau",
