@@ -1,5 +1,6 @@
 import logging
 import re
+
 from database import DatabaseManager
 from handlers.klugscheisser_handler import KlugscheisserHandler
 
@@ -19,8 +20,6 @@ class MessageHandler:
             "gn",
             "good night",
             "hello",
-            "hi",
-            "hey",
             "good evening",
             "evening",
             "yo",
@@ -32,7 +31,6 @@ class MessageHandler:
             "heya",
             "hi there",
             "greetings",
-            "hey there",
             "top of the morning",
             "nighty night",
             "good day",
@@ -43,10 +41,9 @@ class MessageHandler:
             "guten morgen",
             "gumo",
             "moin",
+            "moinsen",
             "servus",
             "hallo",
-            "hi",
-            "hey",
             "tach",
             "tag",
             "guten tag",
@@ -61,7 +58,6 @@ class MessageHandler:
             "grüß dich",
             "na",
             "alles klar",
-            "na du",
             "ey",
             "was geht",
             "hallihallo",
@@ -99,6 +95,8 @@ class MessageHandler:
             "ciao",
             "konnichiwa",
             "annyeong",
+            "hi",
+            "hey",
             "hej",
             "hallå",
             "hei",
