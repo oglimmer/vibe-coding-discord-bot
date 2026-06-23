@@ -2,46 +2,109 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended",
-    ":enableVulnerabilityAlerts"
+    ":enableVulnerabilityAlerts",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    "docker:pinDigests",
+    "helpers:pinGitHubActionDigests",
+    ":pinDevDependencies",
+    "abandonments:recommended"
   ],
-
+  "configMigration": true,
   "timezone": "Europe/Berlin",
-  "prHourlyLimit": 30,
-  "prConcurrentLimit": 30,
+  "prHourlyLimit": 10,
+  "prConcurrentLimit": 20,
   "rebaseWhen": "behind-base-branch",
-
+  "rangeStrategy": "bump",
   "automergeType": "branch",
-  "major": { "automerge": false },
-  "minor": { "automerge": true },
-  "patch": { "automerge": true },
-
-  "lockFileMaintenance": {
-    "enabled": true,
-    "automerge": true
-  },
   "packageRules": [
     {
-      "description": "Pin Python Docker images to 3.12.x",
+      "description": "Group each manager's non-major updates into one PR per manager",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "pinDigest",
+        "digest"
+      ],
+      "groupName": "{{manager}} non-major dependencies"
+    },
+    {
+      "description": "Automerge minor, patch, pin, pinDigest, digest updates (low-risk, non-major)",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "pinDigest",
+        "digest"
+      ],
+      "automerge": true
+    },
+    {
+      "description": "Automerge all devDependencies (build/test tooling, not shipped to consumers)",
+      "matchDepTypes": [
+        "devDependencies"
+      ],
+      "automerge": true
+    },
+    {
+      "description": "Automerge Maven/Gradle wrapper updates",
+      "matchManagers": [
+        "maven-wrapper",
+        "gradle-wrapper"
+      ],
+      "automerge": true
+    },
+    {
+      "description": "Never automerge 0.x releases — semver allows breaking changes before 1.0",
+      "matchCurrentVersion": "/^0\\./",
+      "automerge": false
+    },
+    {
+      "description": "Keep Docker :latest live — never pin a moving tag to a digest",
       "matchDatasources": [
         "docker"
       ],
-      "matchPackageNames": [
-        "python"
-      ],
-      "allowedVersions": "/^3\\.12\\./",
-      "matchFileNames": [
-        "Dockerfile"
-      ]
+      "matchCurrentValue": "/^latest$/",
+      "pinDigests": false
     },
     {
-      "description": "Restrict Python version in GitHub Actions workflows",
-      "matchManagers": [
-        "github-actions"
+      "description": "No release-age delay on Docker digest pins — a pin records which image a tag resolves to, not a new version (version bumps keep their soak)",
+      "matchDatasources": [
+        "docker"
       ],
-      "matchFileNames": [
-        ".github/workflows/**"
+      "matchUpdateTypes": [
+        "pin",
+        "pinDigest",
+        "digest"
       ],
-      "allowedVersions": "/^3\\.12\\./"
+      "minimumReleaseAge": "0 days"
+    },
+    {
+      "description": "Isolate major updates behind Dependency Dashboard approval",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true
     }
-  ]
+  ],
+  "minimumReleaseAge": "7 days",
+  "internalChecksFilter": "strict",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 5am on monday"
+    ],
+    "automerge": true
+  },
+  "vulnerabilityAlerts": {
+    "minimumReleaseAge": "0 days",
+    "labels": [
+      "security"
+    ],
+    "schedule": [
+      "at any time"
+    ],
+    "automerge": true
+  }
 }
