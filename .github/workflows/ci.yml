@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  # Run on every push to any branch except main. Pushing to a feature branch
+  # checks it even before a PR exists, and because status checks are evaluated
+  # per commit SHA, the same run also satisfies the PR merge gate into main
+  # (no separate pull_request trigger, so no duplicate runs).
+  push:
+    branches-ignore: [ main ]
+  # Allow this workflow to be reused as a gate by other workflows
+  # (e.g. the Docker build/push on main).
+  workflow_call:
+
+concurrency:
+  group: "ci-${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Keep this in sync with the ruff rev pinned in .pre-commit-config.yaml
+      - name: Install ruff
+        run: pip install ruff==0.8.4
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmariadb-dev mariadb-client
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run unittest suite
+        run: python -m unittest discover tests -v
+
+      - name: Run pytest e2e suite
+        run: python -m pytest tests/test_e2e_1337.py -v
+
+      - name: Syntax check
+        run: |
+          echo "Checking syntax of all Python files..."
+          find . -name "*.py" -not -path "./.venv/*" -not -path "./venv/*" | xargs python -m py_compile
+          echo "All Python files have valid syntax!"
