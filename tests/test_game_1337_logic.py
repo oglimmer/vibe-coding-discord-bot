@@ -1125,5 +1125,109 @@ class TestGame1337Logic(unittest.TestCase):
         self.assertEqual(assignments["commander"], 789)
 
 
+class TestGame1337FieldReport(unittest.TestCase):
+    """Test the top-3 / close-race / way-off report in winner announcements"""
+
+    def setUp(self):
+        self.db_manager = Mock()
+        self.logic = Game1337Logic(self.db_manager)
+        self.win_time = datetime(2023, 12, 25, 13, 37, 42, 880000)
+
+    def _bet(self, user_id, username, play_time, bet_type="regular"):
+        return {
+            "user_id": user_id,
+            "username": username,
+            "play_time": play_time,
+            "bet_type": bet_type,
+            "server_id": 1,
+            "channel_id": 1,
+        }
+
+    def _winner_data(self, bet):
+        diff = self.logic.calculate_millisecond_difference(
+            bet["play_time"], self.win_time
+        )
+        return {**bet, "win_time": self.win_time, "millisecond_diff": diff}
+
+    def test_format_offset_before_and_after(self):
+        self.assertEqual(self.logic.format_offset(570), "-570ms")
+        self.assertEqual(self.logic.format_offset(2400), "-2.4s")
+        self.assertEqual(self.logic.format_offset(-1500), "+1.5s")
+        self.assertEqual(self.logic.format_offset(0), "-0ms")
+
+    def test_top_three_ranked_by_closeness(self):
+        bets = [
+            self._bet(1, "alice", datetime(2023, 12, 25, 13, 37, 42, 310000)),
+            self._bet(2, "bob", datetime(2023, 12, 25, 13, 37, 42, 840000)),
+            self._bet(3, "carol", datetime(2023, 12, 25, 13, 37, 40, 500000)),
+            self._bet(4, "dave", datetime(2023, 12, 25, 13, 37, 41, 0)),
+        ]
+        self.db_manager.get_daily_bets.return_value = bets
+        lines = self.logic._build_field_report(self._winner_data(bets[1]))
+        report = "\n".join(lines)
+
+        self.assertIn("🏆 Top 3:", report)
+        self.assertIn("🥇 bob", report)
+        self.assertIn("🥈 alice", report)
+        self.assertIn("🥉 dave", report)
+        # carol is 4th-closest, not shown in the top 3
+        self.assertNotIn("carol", report)
+
+    def test_close_race_callout_within_threshold(self):
+        bets = [
+            self._bet(1, "alice", datetime(2023, 12, 25, 13, 37, 42, 310000)),
+            self._bet(2, "bob", datetime(2023, 12, 25, 13, 37, 42, 840000)),
+        ]
+        self.db_manager.get_daily_bets.return_value = bets
+        lines = self.logic._build_field_report(self._winner_data(bets[1]))
+        self.assertTrue(any("Close race" in line for line in lines))
+        self.assertTrue(any("530ms" in line for line in lines))
+
+    def test_no_close_race_when_gap_large(self):
+        bets = [
+            self._bet(1, "alice", datetime(2023, 12, 25, 13, 37, 40, 0)),
+            self._bet(2, "bob", datetime(2023, 12, 25, 13, 37, 42, 840000)),
+        ]
+        self.db_manager.get_daily_bets.return_value = bets
+        lines = self.logic._build_field_report(self._winner_data(bets[1]))
+        self.assertFalse(any("Close race" in line for line in lines))
+
+    def test_way_off_flags_both_directions(self):
+        bets = [
+            self._bet(2, "bob", datetime(2023, 12, 25, 13, 37, 42, 840000)),
+            self._bet(1, "alice", datetime(2023, 12, 25, 13, 37, 42, 310000)),
+            self._bet(3, "carol", datetime(2023, 12, 25, 13, 37, 42, 0)),
+            # 37.9s too early — far enough back to fall outside the top 3
+            self._bet(4, "dave", datetime(2023, 12, 25, 13, 37, 5, 0)),
+            # overshot by 47.1s (invalid bet, but still "way off")
+            self._bet(5, "eve", datetime(2023, 12, 25, 13, 38, 30, 0), "early_bird"),
+        ]
+        self.db_manager.get_daily_bets.return_value = bets
+        lines = self.logic._build_field_report(self._winner_data(bets[0]))
+        report = "\n".join(lines)
+
+        self.assertIn("🛰️ Way off:", report)
+        self.assertIn("dave (-37.9s)", report)
+        self.assertIn("eve (+47.1s)", report)
+
+    def test_way_off_skips_users_shown_in_top_three(self):
+        # Only two players; dave is 37.9s early but is also the 2nd-closest
+        # valid bet, so he should appear in Top 3 and not be repeated.
+        bets = [
+            self._bet(2, "bob", datetime(2023, 12, 25, 13, 37, 42, 840000)),
+            self._bet(4, "dave", datetime(2023, 12, 25, 13, 37, 5, 0)),
+        ]
+        self.db_manager.get_daily_bets.return_value = bets
+        lines = self.logic._build_field_report(self._winner_data(bets[0]))
+        self.assertFalse(any("Way off" in line for line in lines))
+
+    def test_empty_when_no_bets(self):
+        self.db_manager.get_daily_bets.return_value = []
+        winner = self._winner_data(
+            self._bet(2, "bob", datetime(2023, 12, 25, 13, 37, 42, 840000))
+        )
+        self.assertEqual(self.logic._build_field_report(winner), [])
+
+
 if __name__ == "__main__":
     unittest.main()
