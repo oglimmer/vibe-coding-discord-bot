@@ -87,6 +87,31 @@ if ! $TEST_CMD; then
   $TEST_CMD || fail "test suite still failing after repair attempt"
 fi
 
+# A green suite only proves the *existing* tests still pass; it does not prove
+# the new feature is exercised at all. Require the change to add or modify a
+# test, giving the agent one round to add one if it forgot.
+tests_changed() {
+  [ -n "$(git diff --name-only "origin/${BASE_BRANCH}..HEAD" -- tests/)" ]
+}
+if ! tests_changed; then
+  echo "=== no test added; asking aider to add one ==="
+  {
+    echo "Your change does not add or modify any test under tests/."
+    echo "Add a test (python unittest style, discovered by"
+    echo "'python -m unittest discover tests') that exercises the feature you"
+    echo "just implemented and would FAIL without your change. Then ensure the"
+    echo "whole suite still passes."
+  } > /work/test-required-prompt.txt
+  run_aider /work/test-required-prompt.txt || fail "aider test-adding run failed"
+  "$VENV/bin/ruff" check --fix . && "$VENV/bin/ruff" format .
+  if ! git diff --quiet; then
+    git add -A
+    git commit -m "test: add coverage for the new feature" || fail "committing test failed"
+  fi
+  $TEST_CMD || fail "test suite failing after adding tests"
+  tests_changed || fail "the change ships no test (agent did not add one)"
+fi
+
 if [ "$(git rev-list --count "origin/${BASE_BRANCH}..HEAD")" -eq 0 ]; then
   fail "the coding agent made no commits"
 fi

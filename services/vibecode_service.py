@@ -39,20 +39,29 @@ Implement the following feature, requested by Discord user "{username}":
 
 Follow these repository conventions strictly:
 1. Slash commands are discord.py Cogs in commands/<name>_command.py exposing
-   `async def setup(bot, db_manager)`; new commands must be registered in
-   main.py's setup_hook.
+   an async `setup` function; new commands must be registered in main.py's
+   setup_hook. If you change a command's `setup(...)` signature, update EVERY
+   caller in main.py in the same change - a mismatch crashes the bot at startup
+   and no existing test will catch it.
 2. Configuration comes from environment variables declared in config.py (with
    sane defaults) and documented in .env.example.
 3. Database access goes through the DatabaseManager class in database.py;
    schema changes must be idempotent (CREATE TABLE IF NOT EXISTS or guarded
-   ALTER TABLE, following the existing create_tables pattern).
+   ALTER TABLE, following the existing create_tables pattern). Only add DB
+   access if the feature genuinely needs persistence.
 4. User-facing Discord messages use embeds and match the tone of the existing
    commands (German where the surrounding feature is German).
 5. Handle errors with try/except and logger.error like the existing commands.
 
 Quality gates - the work is not done until all of these pass:
-- Add unit tests for the new code in tests/ (unittest style, mock Discord
-  objects and the database like the existing tests do).
+- You MUST add or modify a test under tests/ that directly exercises the
+  feature you were asked to build and that would FAIL if your change were
+  reverted. A change with no such test is incomplete. Write it unittest style
+  (mock Discord objects and the database like the existing tests do) so
+  `python -m unittest discover tests` picks it up.
+- Actually implement the requested behaviour end to end - do not just add
+  scaffolding, config, or fake-DB helpers and stop. The user must see the
+  feature work.
 - `python -m unittest discover tests` passes.
 - `ruff check .` and `ruff format --check .` are clean.
 
