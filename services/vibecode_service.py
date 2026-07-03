@@ -98,16 +98,26 @@ def build_enhanced_prompt(feature: str, username: str) -> str:
 
 
 def parse_result_line(log_text: str) -> dict | None:
-    """Extract the last VIBECODE_RESULT json line from worker logs."""
+    """Extract the last VIBECODE_RESULT json object from worker logs.
+
+    Scans the whole text rather than relying on line splitting: the k8s log
+    can arrive as one blob (e.g. a bytes repr with literal '\\n'), in which
+    case splitlines() yields a single line and trailing repr junk breaks a
+    naive json.loads. raw_decode parses the object and ignores what follows.
+    """
     result = None
-    for line in log_text.splitlines():
-        line = line.strip()
-        if RESULT_MARKER in line:
-            payload = line.split(RESULT_MARKER, 1)[1].strip()
-            try:
-                result = json.loads(payload)
-            except json.JSONDecodeError:
-                logger.warning(f"Unparseable vibecode result line: {line!r}")
+    decoder = json.JSONDecoder()
+    for match in re.finditer(re.escape(RESULT_MARKER), log_text):
+        start = log_text.find("{", match.end())
+        if start == -1:
+            continue
+        try:
+            obj, _ = decoder.raw_decode(log_text, start)
+        except json.JSONDecodeError:
+            logger.warning("Unparseable vibecode result near offset %d", match.end())
+            continue
+        if isinstance(obj, dict):
+            result = obj  # keep the last valid marker
     return result
 
 
@@ -326,11 +336,16 @@ class VibeCodeService:
             )
             if not pods.items:
                 return ""
-            return core.read_namespaced_pod_log(
+            logs = core.read_namespaced_pod_log(
                 name=pods.items[0].metadata.name,
                 namespace=namespace,
                 tail_lines=LOG_TAIL_LINES,
             )
+            # The kubernetes client (>=31 on urllib3 v2) can return bytes here;
+            # decode so the result line parses and real newlines survive.
+            if isinstance(logs, (bytes, bytearray)):
+                logs = logs.decode("utf-8", "replace")
+            return logs
         except Exception as e:
             logger.warning(f"Could not read logs for job {job_name}: {e}")
             return ""
