@@ -300,9 +300,7 @@ class VibeCodeService:
         """Return 'succeeded'/'failed' once the job finished, else None."""
         self._ensure_kube_config()
         batch = k8s_client.BatchV1Api()
-        job = batch.read_namespaced_job_status(
-            name=job_name, namespace=self._namespace()
-        )
+        job = batch.read_namespaced_job(name=job_name, namespace=self._namespace())
         if job.status.succeeded:
             return "succeeded"
         if job.status.failed:
