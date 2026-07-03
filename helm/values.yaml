@@ -113,7 +113,7 @@ env:
   # injected separately, gated on .Values.vibecode.enabled
   VIBECODE_REPO: "oglimmer/vibe-coding-discord-bot"
   VIBECODE_WORKER_IMAGE: "ghcr.io/oglimmer/vibe-coding-discord-bot-worker:latest"
-  VIBECODE_MODEL: "deepseek/deepseek-chat"
+  VIBECODE_MODEL: "deepseek/deepseek-v4-pro"
   VIBECODE_IMAGE_PULL_SECRET: "oglimmerregistrykey"
   VIBECODE_JOB_TIMEOUT_SECONDS: "2700"
   VIBECODE_COOLDOWN_SECONDS: "900"

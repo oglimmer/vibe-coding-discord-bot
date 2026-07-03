@@ -66,7 +66,7 @@ class Config:
         "VIBECODE_WORKER_IMAGE",
         "ghcr.io/oglimmer/vibe-coding-discord-bot-worker:latest",
     )
-    VIBECODE_MODEL = os.getenv("VIBECODE_MODEL", "deepseek/deepseek-chat")
+    VIBECODE_MODEL = os.getenv("VIBECODE_MODEL", "deepseek/deepseek-v4-pro")
     VIBECODE_NAMESPACE = os.getenv("VIBECODE_NAMESPACE")
     VIBECODE_SECRET_NAME = os.getenv("VIBECODE_SECRET_NAME", "discord-bot-secrets")
     VIBECODE_IMAGE_PULL_SECRET = os.getenv("VIBECODE_IMAGE_PULL_SECRET")

@@ -9,7 +9,7 @@
 set -uo pipefail
 
 BASE_BRANCH="${VIBECODE_BASE_BRANCH:-main}"
-AIDER_MODEL="${AIDER_MODEL:-deepseek/deepseek-chat}"
+AIDER_MODEL="${AIDER_MODEL:-deepseek/deepseek-v4-pro}"
 REPO_DIR=/work/repo
 VENV=/work/venv
 
