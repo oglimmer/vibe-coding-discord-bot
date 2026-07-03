@@ -6,7 +6,7 @@ Shows bot information including build date, git revision, and branch.
 import logging
 import discord
 from discord.ext import commands
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import os
 
@@ -18,7 +18,7 @@ class AboutCommand(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.now(timezone.utc)
 
     @discord.app_commands.command(
         name="about", description="Show information about this bot"
@@ -128,7 +128,7 @@ class AboutCommand(commands.Cog):
 
     def _get_uptime(self):
         """Return human-friendly uptime string"""
-        delta = datetime.utcnow() - self.start_time
+        delta = datetime.now(timezone.utc) - self.start_time
         days = delta.days
         hours, remainder = divmod(delta.seconds, 3600)
         minutes, _ = divmod(remainder, 60)
