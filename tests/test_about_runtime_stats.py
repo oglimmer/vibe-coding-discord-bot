@@ -32,7 +32,8 @@ class TestAboutRuntimeStats(unittest.TestCase):
                 "git_branch": "dev",
                 "git_revision": "abc123",
             }):
-                await cog.about(interaction)
+                # call the underlying slash command callback
+                await cog.about.callback(cog, interaction)
 
             send_msg_mock = interaction.response.send_message
             send_msg_mock.assert_called_once()
