@@ -50,7 +50,7 @@ class DiscordBot(commands.Bot):
             await setup_info_1337_command(self, self.db_manager)
             await setup_stats_1337_command(self, self.db_manager)
             await setup_rules_1337_command(self, self.db_manager)
-            await setup_about_command(self, self.db_manager)
+            await setup_about_command(self)
             await setup_klugscheisser_command(self, self.db_manager)
 
             if Config.VIBECODE_ENABLED:
