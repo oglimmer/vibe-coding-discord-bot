@@ -1,3 +1,6 @@
+# Encrypted files (ccrypt) are binary — never let text-fixing hooks rewrite them.
+exclude: '\.cpt$'
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
