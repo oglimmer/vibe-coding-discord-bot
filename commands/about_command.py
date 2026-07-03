@@ -18,6 +18,7 @@ class AboutCommand(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self.start_time = datetime.utcnow()
 
     @discord.app_commands.command(
         name="about", description="Show information about this bot"
@@ -76,8 +77,68 @@ class AboutCommand(commands.Cog):
             name="⚡ Status", value="✅ **Online and Running**", inline=False
         )
 
+        # ----- Runtime statistics (new) -----
+        try:
+            uptime = self._get_uptime()
+        except Exception:
+            uptime = "N/A"
+
+        try:
+            latency = self.bot.latency
+            if latency is not None:
+                latency_ms = round(latency * 1000)
+                latency_str = f"{latency_ms} ms"
+            else:
+                latency_str = "N/A"
+        except Exception:
+            latency_str = "N/A"
+
+        try:
+            guild_count = len(self.bot.guilds)
+        except Exception:
+            guild_count = 0
+
+        try:
+            member_count = sum(
+                getattr(g, "member_count", 0) for g in self.bot.guilds
+            )
+        except Exception:
+            member_count = 0
+
+        try:
+            command_count = len(self.bot.tree.get_commands())
+        except Exception:
+            command_count = 0
+
+        embed.add_field(
+            name="📊 Runtime Statistics",
+            value=(
+                f"**Uptime:** {uptime}\n"
+                f"**Latency:** {latency_str}\n"
+                f"**Servers:** {guild_count}\n"
+                f"**Members:** {member_count}\n"
+                f"**Commands:** {command_count}"
+            ),
+            inline=False,
+        )
+        # ------------------------------------
+
         embed.set_footer(text="Vibe Coding Discord Bot")
         return embed
+
+    def _get_uptime(self):
+        """Return human-friendly uptime string"""
+        delta = datetime.utcnow() - self.start_time
+        days = delta.days
+        hours, remainder = divmod(delta.seconds, 3600)
+        minutes, _ = divmod(remainder, 60)
+        parts = []
+        if days > 0:
+            parts.append(f"{days} day{'s' if days != 1 else ''}")
+        if hours > 0 or days > 0:
+            parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+        parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+        return " ".join(parts) if parts else "0 minutes"
 
     def _get_build_info(self):
         """Get build information from build-info.json file"""
