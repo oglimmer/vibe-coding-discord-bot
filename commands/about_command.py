@@ -99,9 +99,7 @@ class AboutCommand(commands.Cog):
             guild_count = 0
 
         try:
-            member_count = sum(
-                getattr(g, "member_count", 0) for g in self.bot.guilds
-            )
+            member_count = sum(getattr(g, "member_count", 0) for g in self.bot.guilds)
         except Exception:
             member_count = 0
 

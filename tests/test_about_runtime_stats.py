@@ -2,7 +2,6 @@ import asyncio
 import datetime
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
-import discord
 
 from commands.about_command import AboutCommand
 
