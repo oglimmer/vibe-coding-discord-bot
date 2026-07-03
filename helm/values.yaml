@@ -109,6 +109,16 @@ env:
   FACTCHECK_REACTION_EMOJI: "🔍"
   FACTCHECK_DAILY_LIMIT_PER_USER: "5"
 
+  # Vibecode (self-extending bot) - secrets and the enabled flag are
+  # injected separately, gated on .Values.vibecode.enabled
+  VIBECODE_REPO: "oglimmer/vibe-coding-discord-bot"
+  VIBECODE_WORKER_IMAGE: "ghcr.io/oglimmer/vibe-coding-discord-bot-worker:latest"
+  VIBECODE_MODEL: "deepseek/deepseek-chat"
+  VIBECODE_IMAGE_PULL_SECRET: "oglimmerregistrykey"
+  VIBECODE_JOB_TIMEOUT_SECONDS: "2700"
+  VIBECODE_COOLDOWN_SECONDS: "900"
+  VIBECODE_MAX_CONCURRENT_JOBS: "1"
+
 # Secrets configuration - using SealedSecrets
 secrets:
   # These should remain empty in values.yaml - secrets come from SealedSecret
@@ -124,3 +134,9 @@ secretRef:
 # SealedSecret configuration
 sealedSecrets:
   enabled: true  # Enable SealedSecret dependency
+
+# Vibecode: /vibecode lets users have an AI agent implement bot features.
+# Requires DEEPSEEK_API_KEY and VIBECODE_GITHUB_TOKEN in the sealed secret;
+# also adds RBAC so the bot can run worker Jobs in its namespace.
+vibecode:
+  enabled: true

@@ -62,6 +62,20 @@ spec:
                 secretKeyRef:
                   name: discord-bot-secrets
                   key: OPENAI_API_KEY
+            {{- if .Values.vibecode.enabled }}
+            - name: VIBECODE_ENABLED
+              value: "true"
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: discord-bot-secrets
+                  key: DEEPSEEK_API_KEY
+            - name: VIBECODE_GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: discord-bot-secrets
+                  key: VIBECODE_GITHUB_TOKEN
+            {{- end }}
       volumes:
         - name: tmp-logs
           emptyDir: {}

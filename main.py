@@ -19,6 +19,7 @@ from commands.stats_1337_command import setup as setup_stats_1337_command
 from commands.rules_1337_command import setup as setup_rules_1337_command
 from commands.about_command import setup as setup_about_command
 from commands.klugscheisser_command import setup as setup_klugscheisser_command
+from commands.vibecode_command import setup as setup_vibecode_command
 
 logger = setup_logging()
 
@@ -51,6 +52,15 @@ class DiscordBot(commands.Bot):
             await setup_rules_1337_command(self, self.db_manager)
             await setup_about_command(self)
             await setup_klugscheisser_command(self, self.db_manager)
+
+            if Config.VIBECODE_ENABLED:
+                if Config.DEEPSEEK_API_KEY and Config.VIBECODE_GITHUB_TOKEN:
+                    await setup_vibecode_command(self)
+                else:
+                    logger.error(
+                        "VIBECODE_ENABLED is true but DEEPSEEK_API_KEY or "
+                        "VIBECODE_GITHUB_TOKEN is missing - /vibecode disabled"
+                    )
 
             await self.tree.sync()
             logger.info("Command tree synced successfully")

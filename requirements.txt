@@ -3,3 +3,4 @@ mariadb==1.1.14
 python-dotenv==1.2.2
 asyncio-mqtt==0.16.2
 openai>=1.0.0
+kubernetes>=31.0.0

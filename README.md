@@ -9,6 +9,7 @@ A professional Discord bot written in Python 3.12 that responds to greetings wit
 - **Daily Statistics**: `/greetings` slash command shows daily greeting statistics
 - **AI-Powered Internet Troll**: Automatically analyzes longer messages (>100 chars) with configurable probability and acts as a humorous contrarian troll via ChatGPT API (requires user opt-in)
 - **Reaction-Based Fact Checking**: Users can react with 🔍 emoji to any message to request a detailed fact-check with numerical scoring (0-9 scale)
+- **Vibecode (self-extending bot)**: `/vibecode` spawns a Kubernetes Job in which an agentic coding AI (aider + DeepSeek) implements the requested feature in this repository, verifies it with the test suite and ruff, and opens a pull request
 - **Professional Architecture**: Extensible command and message handler system
 - **Comprehensive Logging**: Detailed logging for monitoring and debugging
 - **Database Management**: Professional MariaDB integration with proper connection handling
@@ -34,10 +35,14 @@ kubectl create secret generic discord-bot-secrets \
   --from-literal=DISCORD_TOKEN="XXX" \
   --from-literal=DB_PASSWORD="XXX" \
   --from-literal=OPENAI_API_KEY="XXX" \
+  --from-literal=DEEPSEEK_API_KEY="XXX" \
+  --from-literal=VIBECODE_GITHUB_TOKEN="XXX" \
   --namespace=default \
   --dry-run=client -o yaml | \
   kubeseal -o yaml > sealed-secrets/discord-bot-sealedsecret.yaml
 ```
+
+`DEEPSEEK_API_KEY` and `VIBECODE_GITHUB_TOKEN` are only needed for the `/vibecode` feature (set `vibecode.enabled: false` in `helm/values.yaml` to skip them). The GitHub token should be a fine-grained PAT limited to this repository with `contents: write` and `pull requests: write`.
 
 for a test deployment, you can create a Kubernetes secret directly:
 
@@ -196,6 +201,18 @@ The bot is designed for easy extension:
 1. **Adding Commands**: Create new command files in the `commands/` directory
 2. **Adding Message Handlers**: Extend the `MessageHandler` class or create new handlers
 3. **Database Operations**: Add new methods to the `DatabaseManager` class
+
+## Vibecode: the bot builds its own features
+
+`/vibecode <feature description>` lets anyone on the server extend the bot:
+
+1. The bot creates a **Kubernetes Job** in its own namespace (RBAC for this ships with the Helm chart; the worker image is built by `.github/workflows/worker-build-push.yml` from `worker/`).
+2. The worker clones this repository, creates a `vibecode/...` branch, and runs **aider** with **DeepSeek** on the request. The bot wraps the raw request in an enhanced prompt that pins the repo conventions (cog structure, config, DB access, embeds) and quality gates.
+3. The worker then verifies independently of the agent: `ruff check` / `ruff format` (with one autofix round) and `python -m unittest discover tests` (with one AI repair round on failure).
+4. Only if everything passes does it push the branch and open a **pull request** via the GitHub API; the PR link is posted back to the Discord channel. Nothing merges without human review.
+5. The Job cleans itself up (`ttlSecondsAfterFinished`), is capped by `VIBECODE_JOB_TIMEOUT_SECONDS`, and abuse is limited via a per-user cooldown (`VIBECODE_COOLDOWN_SECONDS`) and a global concurrency cap (`VIBECODE_MAX_CONCURRENT_JOBS`).
+
+Local development: the service falls back to your local kubeconfig when it is not running in-cluster; the target namespace then needs the secret from `VIBECODE_SECRET_NAME` containing `DEEPSEEK_API_KEY` and `VIBECODE_GITHUB_TOKEN`.
 
 ## Testing
 

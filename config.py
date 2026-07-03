@@ -56,6 +56,24 @@ class Config:
     FACTCHECK_REACTION_EMOJI = os.getenv("FACTCHECK_REACTION_EMOJI", "🔍")
     FACTCHECK_DAILY_LIMIT_PER_USER = int(os.getenv("FACTCHECK_DAILY_LIMIT_PER_USER", 5))
 
+    # Vibecode (self-extending bot) Configuration
+    VIBECODE_ENABLED = os.getenv("VIBECODE_ENABLED", "false").lower() == "true"
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+    VIBECODE_GITHUB_TOKEN = os.getenv("VIBECODE_GITHUB_TOKEN")
+    VIBECODE_REPO = os.getenv("VIBECODE_REPO", "oglimmer/vibe-coding-discord-bot")
+    VIBECODE_BASE_BRANCH = os.getenv("VIBECODE_BASE_BRANCH", "main")
+    VIBECODE_WORKER_IMAGE = os.getenv(
+        "VIBECODE_WORKER_IMAGE",
+        "ghcr.io/oglimmer/vibe-coding-discord-bot-worker:latest",
+    )
+    VIBECODE_MODEL = os.getenv("VIBECODE_MODEL", "deepseek/deepseek-chat")
+    VIBECODE_NAMESPACE = os.getenv("VIBECODE_NAMESPACE")
+    VIBECODE_SECRET_NAME = os.getenv("VIBECODE_SECRET_NAME", "discord-bot-secrets")
+    VIBECODE_IMAGE_PULL_SECRET = os.getenv("VIBECODE_IMAGE_PULL_SECRET")
+    VIBECODE_JOB_TIMEOUT_SECONDS = int(os.getenv("VIBECODE_JOB_TIMEOUT_SECONDS", 2700))
+    VIBECODE_COOLDOWN_SECONDS = int(os.getenv("VIBECODE_COOLDOWN_SECONDS", 900))
+    VIBECODE_MAX_CONCURRENT_JOBS = int(os.getenv("VIBECODE_MAX_CONCURRENT_JOBS", 1))
+
 
 def setup_logging():
     logging.basicConfig(
