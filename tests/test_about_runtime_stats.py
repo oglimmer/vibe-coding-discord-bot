@@ -22,16 +22,22 @@ class TestAboutRuntimeStats(unittest.TestCase):
 
             cog = AboutCommand(bot)
             # Override start_time to a fixed past so we can assert uptime presence
-            cog.start_time = datetime.datetime(2025, 1, 1, 10, 0, 0)
+            cog.start_time = datetime.datetime(
+                2025, 1, 1, 10, 0, 0, tzinfo=datetime.timezone.utc
+            )
 
             interaction = MagicMock()
             interaction.response.send_message = AsyncMock()
 
-            with patch.object(AboutCommand, "_get_build_info", return_value={
-                "build_time": "2025-01-01",
-                "git_branch": "dev",
-                "git_revision": "abc123",
-            }):
+            with patch.object(
+                AboutCommand,
+                "_get_build_info",
+                return_value={
+                    "build_time": "2025-01-01",
+                    "git_branch": "dev",
+                    "git_revision": "abc123",
+                },
+            ):
                 # call the underlying slash command callback
                 await cog.about.callback(cog, interaction)
 
@@ -52,12 +58,12 @@ class TestAboutRuntimeStats(unittest.TestCase):
             self.assertIsNotNone(runtime_field, "Runtime Statistics field missing")
 
             field_text = runtime_field.value
-            # uptime value is dynamic, so we only check the label exists
-            self.assertIn("Uptime:", field_text)
-            self.assertIn("Latency: 200 ms", field_text)
-            self.assertIn("Servers: 2", field_text)
-            self.assertIn("Members: 20", field_text)
-            self.assertIn("Commands: 8", field_text)
+            # Check that all expected labels and values appear
+            self.assertIn("**Uptime:**", field_text)
+            self.assertIn("**Latency:** 200 ms", field_text)
+            self.assertIn("**Servers:** 2", field_text)
+            self.assertIn("**Members:** 20", field_text)
+            self.assertIn("**Commands:** 8", field_text)
 
         asyncio.run(async_test())
 
