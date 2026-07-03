@@ -1221,6 +1221,57 @@ class TestGame1337FieldReport(unittest.TestCase):
         lines = self.logic._build_field_report(self._winner_data(bets[0]))
         self.assertFalse(any("Way off" in line for line in lines))
 
+    def test_overshooters_within_threshold_are_called_out(self):
+        bets = [
+            self._bet(1, "bob", datetime(2023, 12, 25, 13, 37, 42, 840000)),
+            # overshot by 120ms — the classic painful near-miss
+            self._bet(2, "alice", datetime(2023, 12, 25, 13, 37, 43, 0)),
+            # overshot by 2.12s — still within the 5s shout-out window
+            self._bet(3, "carol", datetime(2023, 12, 25, 13, 37, 45, 0)),
+            # overshot by 7.12s — past the threshold, not mentioned
+            self._bet(4, "dave", datetime(2023, 12, 25, 13, 37, 50, 0)),
+        ]
+        self.db_manager.get_daily_bets.return_value = bets
+        lines = self.logic._build_field_report(self._winner_data(bets[0]))
+        report = "\n".join(lines)
+
+        self.assertIn("💥 So close, but too late:", report)
+        self.assertIn("alice", report)
+        self.assertIn("(+120ms)", report)
+        self.assertIn("carol", report)
+        self.assertIn("(+2.1s)", report)
+        self.assertNotIn("dave", report)
+        # alice overshot by less than carol, so she is listed first
+        self.assertLess(report.index("alice"), report.index("carol"))
+
+    def test_no_overshoot_section_without_near_misses(self):
+        bets = [
+            self._bet(1, "bob", datetime(2023, 12, 25, 13, 37, 42, 840000)),
+            self._bet(2, "alice", datetime(2023, 12, 25, 13, 37, 42, 310000)),
+        ]
+        self.db_manager.get_daily_bets.return_value = bets
+        lines = self.logic._build_field_report(self._winner_data(bets[0]))
+        self.assertFalse(any("too late" in line for line in lines))
+
+    def test_overshooters_capped_at_three(self):
+        bets = [self._bet(1, "bob", datetime(2023, 12, 25, 13, 37, 42, 840000))]
+        for i, name in enumerate(["alice", "carol", "dave", "eve"]):
+            bets.append(
+                self._bet(
+                    10 + i,
+                    name,
+                    datetime(2023, 12, 25, 13, 37, 43, i * 100000),
+                )
+            )
+        self.db_manager.get_daily_bets.return_value = bets
+        lines = self.logic._build_field_report(self._winner_data(bets[0]))
+        report = "\n".join(lines)
+
+        self.assertIn("alice", report)
+        self.assertIn("carol", report)
+        self.assertIn("dave", report)
+        self.assertNotIn("eve", report)
+
     def test_empty_when_no_bets(self):
         self.db_manager.get_daily_bets.return_value = []
         winner = self._winner_data(

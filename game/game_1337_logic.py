@@ -20,6 +20,8 @@ class Game1337Logic:
     CLOSE_RACE_THRESHOLD_MS = 1000
     # Call out players whose bet was further than this from the win time.
     FAR_OFF_THRESHOLD_MS = 30000
+    # Call out players who overshot the win time by no more than this.
+    OVERSHOOT_THRESHOLD_MS = 5000
 
     def __init__(self, db_manager):
         self.db_manager = db_manager
@@ -654,8 +656,9 @@ class Game1337Logic:
         """Build the 'top 3 / close race / way off' lines for the announcement.
 
         Reads the day's bets, ranks the valid ones (≤ win time) by closeness,
-        flags a near-tie between #1 and #2, and calls out anyone whose bet was
-        more than FAR_OFF_THRESHOLD_MS from the win time.
+        flags a near-tie between #1 and #2, calls out near-miss overshooters
+        (past the win time by at most OVERSHOOT_THRESHOLD_MS), and anyone
+        whose bet was more than FAR_OFF_THRESHOLD_MS from the win time.
         """
         win_time = winner_data["win_time"]
         all_bets = self.get_daily_bets(win_time.date())
@@ -693,6 +696,30 @@ class Game1337Logic:
             )
             if 0 <= gap <= self.CLOSE_RACE_THRESHOLD_MS:
                 lines.append(f"⚡ Close race! Only {gap}ms between #1 and #2.")
+
+        # Near-miss overshooters: past the win time (so their bet was invalid)
+        # but only just — the painful losses worth a shout-out.
+        overshooters = sorted(
+            (
+                bet
+                for bet in all_bets
+                if bet["play_time"] > win_time
+                and -self.calculate_millisecond_difference(bet["play_time"], win_time)
+                <= self.OVERSHOOT_THRESHOLD_MS
+            ),
+            key=lambda bet: bet["play_time"],
+        )
+        if overshooters:
+            shown_user_ids.update(bet["user_id"] for bet in overshooters[:3])
+            lines.append("")
+            lines.append("💥 So close, but too late:")
+            for bet in overshooters[:3]:
+                diff = self.calculate_millisecond_difference(bet["play_time"], win_time)
+                lines.append(
+                    f"• {bet['username']} — "
+                    f"{self.format_time_with_ms(bet['play_time'])} "
+                    f"({self.format_offset(diff)})"
+                )
 
         # Way-off players: more than 30s from the win time, in either direction.
         # Skip anyone already shown in the top 3 to avoid listing them twice.
@@ -738,7 +765,8 @@ class Game1337Logic:
             f"Performance: {winner_data['millisecond_diff']}ms before win time",
         ]
 
-        # Add the top 3 closest bets, a close-race callout, and far-off players
+        # Add the top 3 closest bets, a close-race callout, near-miss
+        # overshooters, and far-off players
         message_lines.extend(self._build_field_report(winner_data))
 
         # Add role assignments only if roles have actually changed
