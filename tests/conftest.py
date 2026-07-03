@@ -208,6 +208,20 @@ class FakeDB:
         self.role_assignments.pop((guild_id, role_type), None)
         return True
 
+    # --- aggregate stats (used by /about) --------------------------------
+
+    def get_total_bets(self):
+        return len(self.bets)
+
+    def get_total_winners(self):
+        return len(self.winners)
+
+    def get_total_factchecks(self):
+        return 0  # FakeDB doesn't track factchecks
+
+    def get_total_greetings(self):
+        return 0  # FakeDB doesn't track greetings
+
     def close(self):
         pass
 
