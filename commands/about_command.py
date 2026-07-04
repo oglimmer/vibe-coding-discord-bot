@@ -47,7 +47,9 @@ class AboutCommand(commands.Cog):
         )
 
         embed.add_field(
-            name="Purpose", value="1337 Game & Greeting Management", inline=True
+            name="Purpose",
+            value="1337 Game & Greeting Management\n*Most sophisticated in Discord VibeCoding*",
+            inline=True,
         )
 
         # Build information from build-info.json
