@@ -94,9 +94,7 @@ class TldrCommand(commands.Cog):
                 description=summary,
                 color=discord.Color.blue(),
             )
-            embed.set_footer(
-                text=f"Basierend auf {len(messages)} Nachrichten"
-            )
+            embed.set_footer(text=f"Basierend auf {len(messages)} Nachrichten")
             await interaction.followup.send(embed=embed)
         except Exception as e:
             logger.error(f"Fehler im tldr-Befehl: {e}", exc_info=True)
