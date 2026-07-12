@@ -9,6 +9,7 @@ A professional Discord bot written in Python 3.12 that responds to greetings wit
 - **Daily Statistics**: `/greetings` slash command shows daily greeting statistics
 - **AI-Powered Internet Troll**: Automatically analyzes longer messages (>100 chars) with configurable probability and acts as a humorous contrarian troll via ChatGPT API (requires user opt-in)
 - **Reaction-Based Fact Checking**: Users can react with 🔍 emoji to any message to request a detailed fact-check with numerical scoring (0-9 scale)
+- **TL;DR Summaries**: `/tldr` summarizes the recent messages of a channel via DeepSeek (optionally scoped to the last N messages or the last hour / 24 hours); users can exclude their own messages with `/tldr_optout` (and re-enable with `/tldr_optin`)
 - **Vibecode (self-extending bot)**: `/vibecode` spawns a Kubernetes Job in which an agentic coding AI (Claude Code + DeepSeek) implements the requested feature in this repository, verifies it with the test suite and ruff, opens a pull request, and works through the AI reviewer's findings until it is approved
 - **Postillon RSS archive**: Polls for new Postillon articles every 15 minutes, stores them in MariaDB, and publishes new entries as Discord embeds
 - **Birthday greetings**: `/birthday-set` stores a birthday, and the bot congratulates the user at 08:00 (Europe/Berlin) with a randomly varied message
@@ -184,6 +185,25 @@ The bot also features a reaction-based fact-checking system that allows users to
 - Comprehensive error handling and user feedback
 - Statistical tracking for monitoring usage
 - Same privacy protection as klugscheißer feature
+
+### TL;DR Configuration
+
+Enable the `/tldr` summary command (uses DeepSeek):
+
+```bash
+# TL;DR Configuration (optional)
+TLDR_ENABLED=true
+DEEPSEEK_API_KEY=your_deepseek_api_key_here   # shared with /vibecode
+TLDR_MODEL=deepseek-chat
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+```
+
+**Available Commands:**
+- `/tldr [anzahl] [zeit]`: Summarize recent channel messages (default: last 50; `zeit` optionally restricts to the last hour or 24 hours)
+- `/tldr_optout`: Exclude your own messages from summaries (they are never sent to the AI)
+- `/tldr_optin`: Re-include your messages
+
+**Privacy:** Messages are sent to DeepSeek to generate the summary. Bot messages and messages from opted-out users are filtered out before anything leaves Discord.
 
 ## Usage
 
