@@ -2,7 +2,6 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
-from datetime import timedelta
 
 from commands.tldr_command import TldrCommand
 
@@ -34,8 +33,10 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
         interaction.channel = MagicMock(spec=discord.TextChannel)
 
         # The command checks Config.OPENAI_API_KEY before doing anything else.
-        with patch("commands.tldr_command.Config.OPENAI_API_KEY", None), \
-                patch("commands.tldr_command.openai.AsyncOpenAI", return_value=AsyncMock()):
+        with (
+            patch("commands.tldr_command.Config.OPENAI_API_KEY", None),
+            patch("commands.tldr_command.openai.AsyncOpenAI", return_value=AsyncMock()),
+        ):
             await self.cog.tldr.callback(self.cog, interaction, anzahl=50, zeit=None)
 
         interaction.followup.send.assert_called_once_with(
@@ -90,9 +91,7 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
         embed = embed_kwargs["embed"]
         self.assertIsInstance(embed, discord.Embed)
         self.assertEqual(embed.title, "📝 TL;DR Zusammenfassung")
-        self.assertIn(
-            "- Jemand hat Hallo Welt gesagt", embed.description
-        )
+        self.assertIn("- Jemand hat Hallo Welt gesagt", embed.description)
         self.assertIn("Basierend auf 2 Nachrichten", embed.footer.text)
 
     async def test_tldr_respects_anzahl_and_zeit_filter(self):
@@ -133,9 +132,7 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        await self.cog.tldr.callback(
-            self.cog, interaction, anzahl=30, zeit="1h"
-        )
+        await self.cog.tldr.callback(self.cog, interaction, anzahl=30, zeit="1h")
 
         interaction.response.defer.assert_called_once_with(ephemeral=False)
         # The stub raises after for 1h
