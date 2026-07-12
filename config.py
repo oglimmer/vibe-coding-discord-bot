@@ -114,8 +114,10 @@ class Config:
         else None
     )
 
-    # TL;DR Message Summarization
+    # TL;DR Message Summarization (uses DeepSeek via the DEEPSEEK_API_KEY)
     TLDR_ENABLED = os.getenv("TLDR_ENABLED", "false").lower() == "true"
+    TLDR_MODEL = os.getenv("TLDR_MODEL", "deepseek-chat")
+    DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
 
 def setup_logging():

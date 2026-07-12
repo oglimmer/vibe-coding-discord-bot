@@ -82,11 +82,11 @@ class DiscordBot(commands.Bot):
                 )
 
             if Config.TLDR_ENABLED:
-                if Config.OPENAI_API_KEY:
+                if Config.DEEPSEEK_API_KEY:
                     await setup_tldr_command(self, self.db_manager)
                 else:
                     logger.error(
-                        "TLDR_ENABLED is true but OPENAI_API_KEY is missing - /tldr disabled"
+                        "TLDR_ENABLED is true but DEEPSEEK_API_KEY is missing - /tldr disabled"
                     )
 
             await self.tree.sync()

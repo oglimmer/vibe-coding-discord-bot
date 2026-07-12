@@ -10,7 +10,9 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bot = MagicMock()
         self.db = MagicMock()
-        self.openai_key = "fake-key"
+        # By default nobody has opted out of /tldr summarization.
+        self.db.get_tldr_opted_out_users.return_value = set()
+        self.deepseek_key = "fake-key"
         # patching during each test is clearer; reset per test.
         self.mock_ai_client = AsyncMock()
         self.cog_patch = patch(
@@ -18,7 +20,7 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
             return_value=self.mock_ai_client,
         )
         self.config_patch = patch(
-            "commands.tldr_command.Config.OPENAI_API_KEY", self.openai_key
+            "commands.tldr_command.Config.DEEPSEEK_API_KEY", self.deepseek_key
         )
         self.mock_ai_class = self.cog_patch.start()
         self.config_patch.start()
@@ -32,15 +34,15 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
         interaction.followup.send = AsyncMock()
         interaction.channel = MagicMock(spec=discord.TextChannel)
 
-        # The command checks Config.OPENAI_API_KEY before doing anything else.
+        # The command checks Config.DEEPSEEK_API_KEY before doing anything else.
         with (
-            patch("commands.tldr_command.Config.OPENAI_API_KEY", None),
+            patch("commands.tldr_command.Config.DEEPSEEK_API_KEY", None),
             patch("commands.tldr_command.openai.AsyncOpenAI", return_value=AsyncMock()),
         ):
             await self.cog.tldr.callback(self.cog, interaction, anzahl=50, zeit=None)
 
         interaction.followup.send.assert_called_once_with(
-            "❌ OpenAI API-Schlüssel fehlt. TL;DR kann nicht genutzt werden.",
+            "❌ DeepSeek API-Schlüssel fehlt. TL;DR kann nicht genutzt werden.",
             ephemeral=True,
         )
 
@@ -63,6 +65,7 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
 
         fake_user = MagicMock()
         fake_user.bot = False
+        fake_user.id = 111
         fake_user.display_name = "Hans"
         fake_msg1 = MagicMock()
         fake_msg1.author = fake_user
@@ -71,7 +74,7 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
         fake_msg2.author = fake_user
         fake_msg2.content = "Wie geht's?"
 
-        async def mock_history(limit=100, after=None):
+        async def mock_history(limit=100, after=None, oldest_first=False):
             yield fake_msg1
             yield fake_msg2
 
@@ -102,6 +105,7 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
 
         fake_user = MagicMock()
         fake_user.bot = False
+        fake_user.id = 222
         fake_user.display_name = "Testi"
 
         # only one message in the future window (we fake time)
@@ -116,7 +120,7 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
         # Override history to filter by after
         call_after = None
 
-        async def mock_history(limit=100, after=None):
+        async def mock_history(limit=100, after=None, oldest_first=False):
             nonlocal call_after
             call_after = after
             if after is None:
@@ -140,13 +144,85 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
         embed = interaction.followup.send.call_args[1]["embed"]
         self.assertIn("Basierend auf 1 Nachrichten", embed.footer.text)
 
+    async def test_tldr_excludes_opted_out_users(self):
+        interaction = MagicMock()
+        interaction.response.defer = AsyncMock()
+        interaction.followup.send = AsyncMock()
+        interaction.channel = MagicMock(spec=discord.TextChannel)
+
+        included_user = MagicMock()
+        included_user.bot = False
+        included_user.id = 1
+        included_user.display_name = "Bleibt"
+
+        opted_out_user = MagicMock()
+        opted_out_user.bot = False
+        opted_out_user.id = 2
+        opted_out_user.display_name = "Raus"
+
+        included_msg = MagicMock()
+        included_msg.author = included_user
+        included_msg.content = "sichtbar"
+
+        excluded_msg = MagicMock()
+        excluded_msg.author = opted_out_user
+        excluded_msg.content = "geheim"
+
+        async def mock_history(limit=100, after=None, oldest_first=False):
+            yield included_msg
+            yield excluded_msg
+
+        interaction.channel.history = mock_history
+        self.db.get_tldr_opted_out_users.return_value = {2}
+
+        self.mock_ai_client.chat.completions.create = AsyncMock()
+        self.mock_ai_client.chat.completions.create.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content="- zusammenfassung"))]
+        )
+
+        await self.cog.tldr.callback(self.cog, interaction, anzahl=10, zeit=None)
+
+        # Only the opted-in user's message should reach the AI.
+        sent_context = self.mock_ai_client.chat.completions.create.call_args[1][
+            "messages"
+        ][1]["content"]
+        self.assertIn("sichtbar", sent_context)
+        self.assertNotIn("geheim", sent_context)
+
+        embed = interaction.followup.send.call_args[1]["embed"]
+        self.assertIn("Basierend auf 1 Nachrichten", embed.footer.text)
+        self.assertIn("1 ausgeschlossen", embed.footer.text)
+
+    async def test_tldr_optout_persists_preference(self):
+        interaction = MagicMock()
+        interaction.user.id = 42
+        interaction.response.send_message = AsyncMock()
+        self.db.set_tldr_optout.return_value = True
+
+        await self.cog.tldr_optout.callback(self.cog, interaction)
+
+        self.db.set_tldr_optout.assert_called_once_with(42, True)
+        interaction.response.send_message.assert_called_once()
+        self.assertTrue(interaction.response.send_message.call_args[1]["ephemeral"])
+
+    async def test_tldr_optin_persists_preference(self):
+        interaction = MagicMock()
+        interaction.user.id = 42
+        interaction.response.send_message = AsyncMock()
+        self.db.set_tldr_optout.return_value = True
+
+        await self.cog.tldr_optin.callback(self.cog, interaction)
+
+        self.db.set_tldr_optout.assert_called_once_with(42, False)
+        interaction.response.send_message.assert_called_once()
+
     async def test_tldr_no_messages(self):
         interaction = MagicMock()
         interaction.response.defer = AsyncMock()
         interaction.followup.send = AsyncMock()
         interaction.channel = MagicMock(spec=discord.TextChannel)
 
-        async def empty_history(limit=100, after=None):
+        async def empty_history(limit=100, after=None, oldest_first=False):
             if False:
                 yield  # no messages
 
