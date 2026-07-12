@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 import logging
 from datetime import timedelta
+from typing import Optional
 import openai
 
 from config import Config
@@ -15,7 +16,11 @@ class TldrCommand(commands.Cog):
 
     def __init__(self, bot, db_manager):
         self.bot = bot
-        self.openai_client = openai.AsyncOpenAI(api_key=Config.OPENAI_API_KEY)
+        self.db_manager = db_manager
+        self.ai_client = openai.AsyncOpenAI(
+            api_key=Config.DEEPSEEK_API_KEY,
+            base_url=Config.DEEPSEEK_BASE_URL,
+        )
 
     @app_commands.command(
         name="tldr",
@@ -31,14 +36,14 @@ class TldrCommand(commands.Cog):
         self,
         interaction: discord.Interaction,
         anzahl: int = 50,
-        zeit: str = None,
+        zeit: Optional[str] = None,
     ):
         """Summarize recent messages of this channel."""
         await interaction.response.defer(ephemeral=False)
 
-        if not Config.OPENAI_API_KEY:
+        if not Config.DEEPSEEK_API_KEY:
             await interaction.followup.send(
-                "❌ OpenAI API-Schlüssel fehlt. TL;DR kann nicht genutzt werden.",
+                "❌ DeepSeek API-Schlüssel fehlt. TL;DR kann nicht genutzt werden.",
                 ephemeral=True,
             )
             return
@@ -59,9 +64,19 @@ class TldrCommand(commands.Cog):
             after = discord.utils.utcnow() - timedelta(hours=24)
 
         try:
+            opted_out = self.db_manager.get_tldr_opted_out_users()
+
             messages = []
-            async for msg in channel.history(limit=limit, after=after):
+            skipped_optout = 0
+            # Always fetch newest-first so a limit keeps the *most recent*
+            # messages (also relevant when `after` is set for time windows).
+            async for msg in channel.history(
+                limit=limit, after=after, oldest_first=False
+            ):
                 if msg.author.bot:
+                    continue
+                if msg.author.id in opted_out:
+                    skipped_optout += 1
                     continue
                 messages.append(msg)
 
@@ -72,11 +87,13 @@ class TldrCommand(commands.Cog):
                 )
                 return
 
-            # Build a combined text to send to OpenAI
+            # Build a combined text to send to the AI. History is newest-first,
+            # so reverse it to give the model chronological order.
             lines = []
             total_chars = 0
             max_chars = 3000
-            for msg in messages:
+            used_messages = 0
+            for msg in reversed(messages):
                 author = msg.author.display_name
                 content = msg.content[:200]  # truncate per message
                 line = f"{author}: {content}"
@@ -84,6 +101,7 @@ class TldrCommand(commands.Cog):
                     break
                 lines.append(line)
                 total_chars += len(line)
+                used_messages += 1
 
             combined = "\n".join(lines)
 
@@ -94,7 +112,10 @@ class TldrCommand(commands.Cog):
                 description=summary,
                 color=discord.Color.blue(),
             )
-            embed.set_footer(text=f"Basierend auf {len(messages)} Nachrichten")
+            footer = f"Basierend auf {used_messages} Nachrichten"
+            if skipped_optout:
+                footer += f" · {skipped_optout} ausgeschlossen (Opt-out)"
+            embed.set_footer(text=footer)
             await interaction.followup.send(embed=embed)
         except Exception as e:
             logger.error(f"Fehler im tldr-Befehl: {e}", exc_info=True)
@@ -103,11 +124,51 @@ class TldrCommand(commands.Cog):
                 ephemeral=True,
             )
 
+    @app_commands.command(
+        name="tldr_optout",
+        description="Schließe deine Nachrichten von /tldr-Zusammenfassungen aus.",
+    )
+    async def tldr_optout(self, interaction: discord.Interaction):
+        """Exclude the invoking user's messages from future /tldr summaries."""
+        ok = self.db_manager.set_tldr_optout(interaction.user.id, True)
+        if ok:
+            await interaction.response.send_message(
+                "🔕 Deine Nachrichten werden ab jetzt aus /tldr-Zusammenfassungen "
+                "ausgeschlossen und nicht mehr an die KI gesendet. "
+                "Mit `/tldr_optin` kannst du das rückgängig machen.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                "⚠️ Deine Einstellung konnte nicht gespeichert werden. "
+                "Bitte später erneut versuchen.",
+                ephemeral=True,
+            )
+
+    @app_commands.command(
+        name="tldr_optin",
+        description="Erlaube wieder, dass deine Nachrichten in /tldr zusammengefasst werden.",
+    )
+    async def tldr_optin(self, interaction: discord.Interaction):
+        """Re-include the invoking user's messages in /tldr summaries."""
+        ok = self.db_manager.set_tldr_optout(interaction.user.id, False)
+        if ok:
+            await interaction.response.send_message(
+                "🔔 Deine Nachrichten können wieder in /tldr-Zusammenfassungen einfließen.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                "⚠️ Deine Einstellung konnte nicht gespeichert werden. "
+                "Bitte später erneut versuchen.",
+                ephemeral=True,
+            )
+
     async def _summarize(self, context: str) -> str:
-        """Use OpenAI to summarize the given context in German bullet points."""
+        """Use DeepSeek to summarize the given context in German bullet points."""
         try:
-            response = await self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+            response = await self.ai_client.chat.completions.create(
+                model=Config.TLDR_MODEL,
                 messages=[
                     {
                         "role": "system",
@@ -124,10 +185,11 @@ class TldrCommand(commands.Cog):
                 ],
                 max_tokens=500,
                 temperature=0.5,
+                timeout=30,
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
-            logger.error(f"OpenAI-Summarization failed: {e}")
+            logger.error(f"DeepSeek summarization failed: {e}")
             raise
 
 
