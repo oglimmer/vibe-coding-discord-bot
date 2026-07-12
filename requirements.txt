@@ -4,3 +4,5 @@ python-dotenv==1.2.2
 asyncio-mqtt==0.16.2
 openai>=1.0.0
 kubernetes>=31.0.0
+feedparser==6.0.12
+aiohttp>=3.10,<4

@@ -2,6 +2,8 @@
 services:
   mariadb:
     image: mariadb
+    volumes:
+      - mariadb_data:/var/lib/mysql
     environment:
       - MARIADB_ROOT_PASSWORD=root
       - MARIADB_DATABASE=vibe-bot
@@ -31,6 +33,18 @@ services:
       - ANNOUNCEMENT_CHANNEL_ID=${ANNOUNCEMENT_CHANNEL_ID}
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - POSTILLON_ENABLED=${POSTILLON_ENABLED:-false}
+      - POSTILLON_CHANNEL_ID=${POSTILLON_CHANNEL_ID:-}
+      - POSTILLON_FEED_URL=${POSTILLON_FEED_URL:-https://www.der-postillon.com/feeds/posts/default?alt=rss&max-results=50&start-index=1}
+      - POSTILLON_POLL_INTERVAL_MINUTES=${POSTILLON_POLL_INTERVAL_MINUTES:-15}
+      - POSTILLON_TIMEZONE=${POSTILLON_TIMEZONE:-Europe/Berlin}
+      - POSTILLON_ANNOUNCE_FIRST_SYNC=${POSTILLON_ANNOUNCE_FIRST_SYNC:-false}
+      - POSTILLON_REQUEST_TIMEOUT_SECONDS=${POSTILLON_REQUEST_TIMEOUT_SECONDS:-20}
+      - POSTILLON_DELIVERY_DELAY_SECONDS=${POSTILLON_DELIVERY_DELAY_SECONDS:-1}
+      - POSTILLON_LEASE_SECONDS=${POSTILLON_LEASE_SECONDS:-1800}
     depends_on:
         mariadb:
             condition: service_healthy
+
+volumes:
+  mariadb_data:

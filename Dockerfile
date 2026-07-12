@@ -32,7 +32,7 @@ COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Create a non-root user for security
-RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
+RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app /var/log
 USER app
 
 ENTRYPOINT ["/app/entrypoint.sh"]

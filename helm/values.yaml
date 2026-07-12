@@ -119,6 +119,17 @@ env:
   VIBECODE_COOLDOWN_SECONDS: "900"
   VIBECODE_MAX_CONCURRENT_JOBS: "1"
 
+  # Postillon RSS feed
+  POSTILLON_ENABLED: "false"
+  POSTILLON_CHANNEL_ID: ""
+  POSTILLON_FEED_URL: "https://www.der-postillon.com/feeds/posts/default?alt=rss&max-results=50&start-index=1"
+  POSTILLON_POLL_INTERVAL_MINUTES: "15"
+  POSTILLON_TIMEZONE: "Europe/Berlin"
+  POSTILLON_ANNOUNCE_FIRST_SYNC: "false"
+  POSTILLON_REQUEST_TIMEOUT_SECONDS: "20"
+  POSTILLON_DELIVERY_DELAY_SECONDS: "1"
+  POSTILLON_LEASE_SECONDS: "1800"
+
 # Secrets configuration - using SealedSecrets
 secrets:
   # These should remain empty in values.yaml - secrets come from SealedSecret

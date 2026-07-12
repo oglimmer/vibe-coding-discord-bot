@@ -74,6 +74,33 @@ class Config:
     VIBECODE_COOLDOWN_SECONDS = int(os.getenv("VIBECODE_COOLDOWN_SECONDS", 900))
     VIBECODE_MAX_CONCURRENT_JOBS = int(os.getenv("VIBECODE_MAX_CONCURRENT_JOBS", 1))
 
+    # Postillon RSS feed configuration
+    POSTILLON_ENABLED = os.getenv("POSTILLON_ENABLED", "false").lower() == "true"
+    POSTILLON_FEED_URL = os.getenv(
+        "POSTILLON_FEED_URL",
+        "https://www.der-postillon.com/feeds/posts/default"
+        "?alt=rss&max-results=50&start-index=1",
+    )
+    POSTILLON_CHANNEL_ID = (
+        int(os.getenv("POSTILLON_CHANNEL_ID"))
+        if os.getenv("POSTILLON_CHANNEL_ID")
+        else None
+    )
+    POSTILLON_POLL_INTERVAL_MINUTES = int(
+        os.getenv("POSTILLON_POLL_INTERVAL_MINUTES", "15")
+    )
+    POSTILLON_TIMEZONE = os.getenv("POSTILLON_TIMEZONE", "Europe/Berlin")
+    POSTILLON_ANNOUNCE_FIRST_SYNC = (
+        os.getenv("POSTILLON_ANNOUNCE_FIRST_SYNC", "false").lower() == "true"
+    )
+    POSTILLON_REQUEST_TIMEOUT_SECONDS = int(
+        os.getenv("POSTILLON_REQUEST_TIMEOUT_SECONDS", "20")
+    )
+    POSTILLON_DELIVERY_DELAY_SECONDS = float(
+        os.getenv("POSTILLON_DELIVERY_DELAY_SECONDS", "1")
+    )
+    POSTILLON_LEASE_SECONDS = int(os.getenv("POSTILLON_LEASE_SECONDS", "1800"))
+
 
 def setup_logging():
     logging.basicConfig(

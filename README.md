@@ -10,6 +10,7 @@ A professional Discord bot written in Python 3.12 that responds to greetings wit
 - **AI-Powered Internet Troll**: Automatically analyzes longer messages (>100 chars) with configurable probability and acts as a humorous contrarian troll via ChatGPT API (requires user opt-in)
 - **Reaction-Based Fact Checking**: Users can react with 🔍 emoji to any message to request a detailed fact-check with numerical scoring (0-9 scale)
 - **Vibecode (self-extending bot)**: `/vibecode` spawns a Kubernetes Job in which an agentic coding AI (aider + DeepSeek) implements the requested feature in this repository, verifies it with the test suite and ruff, and opens a pull request
+- **Postillon RSS archive**: Polls for new Postillon articles every 15 minutes, stores them in MariaDB, and publishes new entries as Discord embeds
 - **Professional Architecture**: Extensible command and message handler system
 - **Comprehensive Logging**: Detailed logging for monitoring and debugging
 - **Database Management**: Professional MariaDB integration with proper connection handling
@@ -189,6 +190,71 @@ The bot also features a reaction-based fact-checking system that allows users to
 ```bash
 python main.py
 ```
+
+### Start with Docker Compose
+
+1. Copy the environment template and configure at least the Discord token:
+
+```bash
+cp .env.example .env
+```
+
+2. To enable the Postillon feed, set these values in `.env`:
+
+```dotenv
+POSTILLON_ENABLED=true
+POSTILLON_CHANNEL_ID=123456789012345678
+POSTILLON_POLL_INTERVAL_MINUTES=15
+POSTILLON_TIMEZONE=Europe/Berlin
+POSTILLON_ANNOUNCE_FIRST_SYNC=false
+```
+
+`POSTILLON_CHANNEL_ID` is the numeric ID of the Discord channel. Enable
+Developer Mode in Discord, right-click the channel, and select **Copy Channel
+ID**. The bot needs the `View Channel`, `Send Messages`, and `Embed Links`
+permissions in that channel.
+
+3. Build and start MariaDB and the bot:
+
+```bash
+docker compose up --build
+```
+
+The database tables are created automatically. On the first successful sync,
+the current feed entries are stored but not posted when
+`POSTILLON_ANNOUNCE_FIRST_SYNC=false`. Use `/postillon_sync` as a server
+administrator to trigger the first sync immediately.
+
+4. Run in the background or inspect logs:
+
+```bash
+docker compose up --build -d
+docker compose logs -f bot
+```
+
+Stop the deployment with:
+
+```bash
+docker compose down
+```
+
+### Start directly with Python
+
+Python 3.12, MariaDB development libraries, and a running MariaDB server are
+required. Configure `.env`, then run:
+
+```bash
+python3.12 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+python main.py
+```
+
+Available Postillon commands after Discord has synchronized the command tree:
+
+- `/postillon amount:10`: browse recent stored articles
+- `/postillon_status`: show import and delivery status
+- `/postillon_sync`: manually import now; requires `Manage Server`
 
 ## Database Schema
 
