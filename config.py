@@ -114,6 +114,9 @@ class Config:
         else None
     )
 
+    # TL;DR Message Summarization
+    TLDR_ENABLED = os.getenv("TLDR_ENABLED", "false").lower() == "true"
+
 
 def setup_logging():
     logging.basicConfig(

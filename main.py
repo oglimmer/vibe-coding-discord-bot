@@ -22,6 +22,7 @@ from commands.klugscheisser_command import setup as setup_klugscheisser_command
 from commands.vibecode_command import setup as setup_vibecode_command
 from commands.postillon_command import setup as setup_postillon_command
 from commands.birthday_command import setup as setup_birthday_command
+from commands.tldr_command import setup as setup_tldr_command
 
 logger = setup_logging()
 
@@ -79,6 +80,14 @@ class DiscordBot(commands.Bot):
                     "Neither BIRTHDAY_CHANNEL_ID nor ANNOUNCEMENT_CHANNEL_ID is set "
                     "- birthday greetings will not be delivered"
                 )
+
+            if Config.TLDR_ENABLED:
+                if Config.OPENAI_API_KEY:
+                    await setup_tldr_command(self, self.db_manager)
+                else:
+                    logger.error(
+                        "TLDR_ENABLED is true but OPENAI_API_KEY is missing - /tldr disabled"
+                    )
 
             await self.tree.sync()
             logger.info("Command tree synced successfully")
