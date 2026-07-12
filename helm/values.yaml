@@ -120,8 +120,8 @@ env:
   VIBECODE_MAX_CONCURRENT_JOBS: "1"
 
   # Postillon RSS feed
-  POSTILLON_ENABLED: "false"
-  POSTILLON_CHANNEL_ID: ""
+  POSTILLON_ENABLED: "true"
+  POSTILLON_CHANNEL_ID: "1487349441773174976"
   POSTILLON_FEED_URL: "https://www.der-postillon.com/feeds/posts/default?alt=rss&max-results=50&start-index=1"
   POSTILLON_POLL_INTERVAL_MINUTES: "15"
   POSTILLON_TIMEZONE: "Europe/Berlin"
