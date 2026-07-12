@@ -2,6 +2,7 @@ import mariadb
 import logging
 from config import Config
 import dataclasses
+import json
 from datetime import datetime
 from typing import List, Optional
 
@@ -186,6 +187,69 @@ class DatabaseManager:
                     INDEX idx_hash (message_content_hash),
                     INDEX idx_type (response_type),
                     INDEX idx_last_used (last_used)
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS postillon_posts (
+                    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    identity_hash CHAR(64) CHARACTER SET ascii NOT NULL,
+                    url_hash CHAR(64) CHARACTER SET ascii NOT NULL,
+                    external_id VARCHAR(512),
+                    title TEXT NOT NULL,
+                    url VARCHAR(2048) NOT NULL,
+                    author VARCHAR(255),
+                    summary_text TEXT,
+                    image_url VARCHAR(2048),
+                    categories_json TEXT,
+                    published_at DATETIME,
+                    source_updated_at DATETIME,
+                    content_hash CHAR(64) CHARACTER SET ascii NOT NULL,
+                    first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY unique_postillon_identity (identity_hash),
+                    UNIQUE KEY unique_postillon_url (url_hash),
+                    INDEX idx_postillon_published (published_at),
+                    INDEX idx_postillon_first_seen (first_seen_at)
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS postillon_deliveries (
+                    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    post_id BIGINT UNSIGNED NOT NULL,
+                    channel_id BIGINT NOT NULL,
+                    status ENUM('pending', 'sending', 'sent') NOT NULL
+                        DEFAULT 'pending',
+                    attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+                    claimed_at DATETIME,
+                    discord_message_id BIGINT,
+                    delivered_at DATETIME,
+                    last_error TEXT,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (post_id) REFERENCES postillon_posts(id)
+                        ON DELETE CASCADE,
+                    UNIQUE KEY unique_postillon_post_channel (post_id, channel_id),
+                    INDEX idx_postillon_delivery_work (status, claimed_at)
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS postillon_feed_state (
+                    feed_key VARCHAR(191) PRIMARY KEY,
+                    etag VARCHAR(512),
+                    last_modified VARCHAR(512),
+                    last_attempt_at DATETIME,
+                    last_success_at DATETIME,
+                    last_error TEXT,
+                    initial_sync_completed BOOLEAN NOT NULL DEFAULT FALSE,
+                    lease_owner VARCHAR(255),
+                    lease_until DATETIME,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        ON UPDATE CURRENT_TIMESTAMP
                 )
             """)
 
@@ -1459,6 +1523,417 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error saving ai_response_cache: {e}")
             return False
+        finally:
+            if connection:
+                connection.close()
+
+    def get_postillon_feed_state(self, feed_key):
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                SELECT feed_key, etag, last_modified, last_attempt_at,
+                       last_success_at, last_error, initial_sync_completed,
+                       lease_owner, lease_until
+                FROM postillon_feed_state
+                WHERE feed_key = ?
+                """,
+                (feed_key,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            keys = (
+                "feed_key",
+                "etag",
+                "last_modified",
+                "last_attempt_at",
+                "last_success_at",
+                "last_error",
+                "initial_sync_completed",
+                "lease_owner",
+                "lease_until",
+            )
+            return dict(zip(keys, row))
+        finally:
+            if connection:
+                connection.close()
+
+    def try_acquire_postillon_lease(self, feed_key, owner, lease_seconds):
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                "INSERT IGNORE INTO postillon_feed_state (feed_key) VALUES (?)",
+                (feed_key,),
+            )
+            cursor.execute(
+                """
+                UPDATE postillon_feed_state
+                SET lease_owner = ?,
+                    lease_until = DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? SECOND)
+                WHERE feed_key = ?
+                  AND (lease_until IS NULL OR lease_until < UTC_TIMESTAMP()
+                       OR lease_owner = ?)
+                """,
+                (owner, lease_seconds, feed_key, owner),
+            )
+            cursor.execute(
+                "SELECT lease_owner FROM postillon_feed_state WHERE feed_key = ?",
+                (feed_key,),
+            )
+            row = cursor.fetchone()
+            acquired = bool(row and row[0] == owner)
+            connection.commit()
+            return acquired
+        except mariadb.Error:
+            if connection:
+                connection.rollback()
+            raise
+        finally:
+            if connection:
+                connection.close()
+
+    def release_postillon_lease(self, feed_key, owner):
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE postillon_feed_state
+                SET lease_owner = NULL, lease_until = NULL
+                WHERE feed_key = ? AND lease_owner = ?
+                """,
+                (feed_key, owner),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+        finally:
+            if connection:
+                connection.close()
+
+    def record_postillon_attempt(self, feed_key, error=None):
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                INSERT INTO postillon_feed_state
+                    (feed_key, last_attempt_at, last_error)
+                VALUES (?, UTC_TIMESTAMP(), ?)
+                ON DUPLICATE KEY UPDATE
+                    last_attempt_at = UTC_TIMESTAMP(),
+                    last_error = VALUES(last_error)
+                """,
+                (feed_key, error),
+            )
+            connection.commit()
+            return True
+        finally:
+            if connection:
+                connection.close()
+
+    def record_postillon_not_modified(self, feed_key, etag=None, last_modified=None):
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE postillon_feed_state
+                SET etag = COALESCE(?, etag),
+                    last_modified = COALESCE(?, last_modified),
+                    last_attempt_at = UTC_TIMESTAMP(),
+                    last_success_at = UTC_TIMESTAMP(),
+                    last_error = NULL
+                WHERE feed_key = ?
+                """,
+                (etag, last_modified, feed_key),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+        finally:
+            if connection:
+                connection.close()
+
+    def import_postillon_posts(
+        self,
+        feed_key,
+        posts,
+        channel_id,
+        announce_first_sync,
+        etag=None,
+        last_modified=None,
+    ):
+        connection = None
+        try:
+            connection = self._get_connection()
+            connection.autocommit = False
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT initial_sync_completed FROM postillon_feed_state "
+                "WHERE feed_key = ? FOR UPDATE",
+                (feed_key,),
+            )
+            state = cursor.fetchone()
+            initial_sync_completed = bool(state and state[0])
+            inserted = 0
+            updated = 0
+            queued = 0
+
+            for post in posts:
+                cursor.execute(
+                    """
+                    SELECT id, content_hash
+                    FROM postillon_posts
+                    WHERE identity_hash = ?
+                    LIMIT 1 FOR UPDATE
+                    """,
+                    (post.identity_hash,),
+                )
+                identity_match = cursor.fetchone()
+                cursor.execute(
+                    """
+                    SELECT id, content_hash
+                    FROM postillon_posts
+                    WHERE url_hash = ?
+                    LIMIT 1 FOR UPDATE
+                    """,
+                    (post.url_hash,),
+                )
+                url_match = cursor.fetchone()
+                if identity_match and url_match and identity_match[0] != url_match[0]:
+                    logger.error(
+                        "Skipping ambiguous Postillon identity/URL collision for %s",
+                        post.url,
+                    )
+                    continue
+                existing = identity_match or url_match
+                values = (
+                    post.identity_hash,
+                    post.url_hash,
+                    post.external_id,
+                    post.title,
+                    post.url,
+                    post.author,
+                    post.summary_text,
+                    post.image_url,
+                    json.dumps(post.categories, ensure_ascii=False),
+                    post.published_at,
+                    post.updated_at,
+                    post.content_hash,
+                )
+                if existing:
+                    post_id, old_content_hash = existing
+                    cursor.execute(
+                        """
+                        UPDATE postillon_posts
+                        SET identity_hash = ?, url_hash = ?, external_id = ?,
+                            title = ?, url = ?, author = ?, summary_text = ?,
+                            image_url = ?, categories_json = ?, published_at = ?,
+                            source_updated_at = ?, content_hash = ?
+                        WHERE id = ?
+                        """,
+                        (*values, post_id),
+                    )
+                    if old_content_hash != post.content_hash:
+                        updated += 1
+                    continue
+
+                cursor.execute(
+                    """
+                    INSERT INTO postillon_posts
+                        (identity_hash, url_hash, external_id, title, url, author,
+                         summary_text, image_url, categories_json, published_at,
+                         source_updated_at, content_hash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    values,
+                )
+                post_id = cursor.lastrowid
+                inserted += 1
+                if initial_sync_completed or announce_first_sync:
+                    cursor.execute(
+                        """
+                        INSERT INTO postillon_deliveries (post_id, channel_id)
+                        VALUES (?, ?)
+                        ON DUPLICATE KEY UPDATE post_id = post_id
+                        """,
+                        (post_id, channel_id),
+                    )
+                    if cursor.rowcount == 1:
+                        queued += 1
+
+            cursor.execute(
+                """
+                UPDATE postillon_feed_state
+                SET etag = ?, last_modified = ?,
+                    last_attempt_at = UTC_TIMESTAMP(),
+                    last_success_at = UTC_TIMESTAMP(), last_error = NULL,
+                    initial_sync_completed = TRUE
+                WHERE feed_key = ?
+                """,
+                (etag, last_modified, feed_key),
+            )
+            connection.commit()
+            return {"inserted": inserted, "updated": updated, "queued": queued}
+        except Exception:
+            if connection:
+                connection.rollback()
+            raise
+        finally:
+            if connection:
+                connection.close()
+
+    def claim_postillon_deliveries(self, channel_id, stale_after_seconds, limit=50):
+        connection = None
+        try:
+            connection = self._get_connection()
+            connection.autocommit = False
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                SELECT d.id, p.id, p.external_id, p.title, p.url, p.author,
+                       p.summary_text, p.image_url, p.categories_json,
+                       p.published_at, p.source_updated_at
+                FROM postillon_deliveries d
+                JOIN postillon_posts p ON p.id = d.post_id
+                WHERE d.channel_id = ?
+                  AND (d.status = 'pending'
+                       OR (d.status = 'sending' AND d.claimed_at <
+                           DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? SECOND)))
+                ORDER BY COALESCE(p.published_at, p.first_seen_at) ASC, p.id ASC
+                LIMIT ? FOR UPDATE
+                """,
+                (channel_id, stale_after_seconds, limit),
+            )
+            rows = cursor.fetchall()
+            if rows:
+                placeholders = ",".join("?" for _ in rows)
+                cursor.execute(
+                    f"""
+                    UPDATE postillon_deliveries
+                    SET status = 'sending', claimed_at = UTC_TIMESTAMP(),
+                        attempt_count = attempt_count + 1
+                    WHERE id IN ({placeholders})
+                    """,
+                    tuple(row[0] for row in rows),
+                )
+            connection.commit()
+            keys = (
+                "delivery_id",
+                "post_id",
+                "external_id",
+                "title",
+                "url",
+                "author",
+                "summary_text",
+                "image_url",
+                "categories_json",
+                "published_at",
+                "updated_at",
+            )
+            return [dict(zip(keys, row)) for row in rows]
+        except Exception:
+            if connection:
+                connection.rollback()
+            raise
+        finally:
+            if connection:
+                connection.close()
+
+    def mark_postillon_delivery_sent(self, delivery_id, discord_message_id):
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE postillon_deliveries
+                SET status = 'sent', discord_message_id = ?,
+                    delivered_at = UTC_TIMESTAMP(), last_error = NULL
+                WHERE id = ? AND status = 'sending'
+                """,
+                (discord_message_id, delivery_id),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+        finally:
+            if connection:
+                connection.close()
+
+    def mark_postillon_delivery_pending(self, delivery_id, error):
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE postillon_deliveries
+                SET status = 'pending', claimed_at = NULL, last_error = ?
+                WHERE id = ? AND status = 'sending'
+                """,
+                (error[:65535], delivery_id),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+        finally:
+            if connection:
+                connection.close()
+
+    def get_recent_postillon_posts(self, amount=10):
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                SELECT id, external_id, title, url, author, summary_text,
+                       image_url, categories_json, published_at, source_updated_at
+                FROM postillon_posts
+                ORDER BY COALESCE(published_at, first_seen_at) DESC, id DESC
+                LIMIT ?
+                """,
+                (amount,),
+            )
+            keys = (
+                "post_id",
+                "external_id",
+                "title",
+                "url",
+                "author",
+                "summary_text",
+                "image_url",
+                "categories_json",
+                "published_at",
+                "updated_at",
+            )
+            return [dict(zip(keys, row)) for row in cursor.fetchall()]
+        finally:
+            if connection:
+                connection.close()
+
+    def get_postillon_stats(self, channel_id):
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute("SELECT COUNT(*) FROM postillon_posts")
+            posts = cursor.fetchone()[0]
+            cursor.execute(
+                """
+                SELECT status, COUNT(*) FROM postillon_deliveries
+                WHERE channel_id = ? GROUP BY status
+                """,
+                (channel_id,),
+            )
+            deliveries = {row[0]: row[1] for row in cursor.fetchall()}
+            return {"posts": posts, "deliveries": deliveries}
         finally:
             if connection:
                 connection.close()

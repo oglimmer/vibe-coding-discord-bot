@@ -20,6 +20,7 @@ from commands.rules_1337_command import setup as setup_rules_1337_command
 from commands.about_command import setup as setup_about_command
 from commands.klugscheisser_command import setup as setup_klugscheisser_command
 from commands.vibecode_command import setup as setup_vibecode_command
+from commands.postillon_command import setup as setup_postillon_command
 
 logger = setup_logging()
 
@@ -60,6 +61,15 @@ class DiscordBot(commands.Bot):
                     logger.error(
                         "VIBECODE_ENABLED is true but DEEPSEEK_API_KEY or "
                         "VIBECODE_GITHUB_TOKEN is missing - /vibecode disabled"
+                    )
+
+            if Config.POSTILLON_ENABLED:
+                if Config.POSTILLON_CHANNEL_ID:
+                    await setup_postillon_command(self, self.db_manager)
+                else:
+                    logger.error(
+                        "POSTILLON_ENABLED is true but POSTILLON_CHANNEL_ID is "
+                        "missing - Postillon integration disabled"
                     )
 
             await self.tree.sync()

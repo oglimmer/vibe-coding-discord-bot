@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:atom="http://www.w3.org/2005/Atom"
+     xmlns:media="http://search.yahoo.com/mrss/" version="2.0">
+  <channel>
+    <title>Der Postillon</title>
+    <link>https://www.der-postillon.com/</link>
+    <description>Satire</description>
+    <item>
+      <guid isPermaLink="false">post-1</guid>
+      <title>Erster &amp; bester Artikel</title>
+      <link>https://www.der-postillon.com/2026/07/erster.html</link>
+      <author>redaktion@example.com (Der Postillon)</author>
+      <pubDate>Sat, 11 Jul 2026 08:00:00 +0000</pubDate>
+      <atom:updated>2026-07-11T10:30:00+02:00</atom:updated>
+      <category>Politik</category>
+      <category>Zeitlos</category>
+      <description><![CDATA[
+        <p>Ein <strong>kurzer</strong> Text &amp; weitere Details.</p>
+        <img src="https://images.example/first.jpg" />
+        <a href="https://www.der-postillon.com/2026/07/erster.html#more">mehr...</a>
+      ]]></description>
+      <media:thumbnail url="https://images.example/thumb.jpg" />
+    </item>
+    <item>
+      <title>Zweiter Artikel ohne GUID</title>
+      <link>https://www.der-postillon.com/2026/07/zweiter.html</link>
+      <pubDate>kein Datum</pubDate>
+      <description><![CDATA[<p>Zweiter Text</p>]]></description>
+    </item>
+    <item>
+      <guid>broken</guid>
+      <title>Kaputter Eintrag ohne URL</title>
+    </item>
+  </channel>
+</rss>
