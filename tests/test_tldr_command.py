@@ -28,20 +28,16 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
         self.cog = TldrCommand(self.bot, self.db)
 
     async def test_tldr_no_api_key_sends_error(self):
-        # re-create cog with missing key
-        with patch(
-            "commands.tldr_command.Config.OPENAI_API_KEY", None
-        ), patch(
-            "commands.tldr_command.openai.AsyncOpenAI"
-        ) as mock_ai:
-            mock_ai.return_value = AsyncMock()
-            cog = TldrCommand(self.bot, self.db)
-
         interaction = MagicMock()
         interaction.response.defer = AsyncMock()
         interaction.followup.send = AsyncMock()
         interaction.channel = MagicMock(spec=discord.TextChannel)
-        await cog.tldr.callback(cog, interaction, anzahl=50, zeit=None)
+
+        # The command checks Config.OPENAI_API_KEY before doing anything else.
+        with patch("commands.tldr_command.Config.OPENAI_API_KEY", None), \
+                patch("commands.tldr_command.openai.AsyncOpenAI", return_value=AsyncMock()):
+            await self.cog.tldr.callback(self.cog, interaction, anzahl=50, zeit=None)
+
         interaction.followup.send.assert_called_once_with(
             "❌ OpenAI API-Schlüssel fehlt. TL;DR kann nicht genutzt werden.",
             ephemeral=True,
