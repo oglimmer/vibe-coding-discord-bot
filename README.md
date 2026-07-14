@@ -203,6 +203,8 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 - `/tldr_optin`: Allow your own messages to be included in summaries (they are otherwise never sent to the AI)
 - `/tldr_optout`: Exclude your messages again (this is the default)
 
+On Kubernetes, enable the feature via the Helm chart's `tldr.enabled` value (default `true`); it injects `TLDR_ENABLED` and the shared `DEEPSEEK_API_KEY` (from the sealed secret) into the deployment. `TLDR_MODEL` and `DEEPSEEK_BASE_URL` are set in `helm/values.yaml`'s `env` block.
+
 **Privacy:** `/tldr` is opt-in only. Messages are sent to DeepSeek to generate the summary, but only messages from users who have run `/tldr_optin` ever leave Discord — bot messages and messages from everyone else are filtered out first.
 
 ## Usage

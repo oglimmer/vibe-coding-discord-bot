@@ -62,14 +62,20 @@ spec:
                 secretKeyRef:
                   name: discord-bot-secrets
                   key: OPENAI_API_KEY
-            {{- if .Values.vibecode.enabled }}
-            - name: VIBECODE_ENABLED
+            {{- if .Values.tldr.enabled }}
+            - name: TLDR_ENABLED
               value: "true"
+            {{- end }}
+            {{- if or .Values.vibecode.enabled .Values.tldr.enabled }}
             - name: DEEPSEEK_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: discord-bot-secrets
                   key: DEEPSEEK_API_KEY
+            {{- end }}
+            {{- if .Values.vibecode.enabled }}
+            - name: VIBECODE_ENABLED
+              value: "true"
             - name: VIBECODE_GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
