@@ -199,7 +199,7 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
 **Available Commands:**
-- `/tldr [anzahl] [zeit]`: Summarize recent channel messages (default: last 50; `zeit` optionally restricts to the last hour or 24 hours)
+- `/tldr [anzahl] [zeit]`: Summarize recent channel messages (works in text channels and threads). `anzahl` (5–200, default 50) is how many recent messages are **scanned**; the summary itself only covers those from opted-in users, so it may contain fewer. `zeit` optionally restricts to the last hour or 24 hours.
 - `/tldr_optin`: Allow your own messages to be included in summaries (they are otherwise never sent to the AI)
 - `/tldr_optout`: Exclude your messages again (this is the default)
 
