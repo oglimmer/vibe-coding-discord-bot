@@ -1139,24 +1139,6 @@ class DatabaseManager:
             if connection:
                 connection.close()
 
-    def is_tldr_opted_in(self, user_id):
-        """Return True if the user has opted in to /tldr summarization."""
-        connection = None
-        try:
-            connection = self._get_connection()
-            cursor = connection.cursor()
-            cursor.execute(
-                "SELECT 1 FROM tldr_optins WHERE user_id = ?",
-                (user_id,),
-            )
-            return cursor.fetchone() is not None
-        except mariadb.Error as e:
-            logger.error(f"Error fetching tldr opt-in: {e}")
-            return False
-        finally:
-            if connection:
-                connection.close()
-
     def get_tldr_opted_in_users(self):
         """Return the set of user_ids that have opted in to /tldr summarization."""
         connection = None

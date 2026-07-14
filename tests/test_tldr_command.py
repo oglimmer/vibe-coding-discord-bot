@@ -32,31 +32,66 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
     async def test_tldr_no_api_key_sends_error(self):
         interaction = MagicMock()
         interaction.response.defer = AsyncMock()
-        interaction.followup.send = AsyncMock()
+        interaction.response.send_message = AsyncMock()
         interaction.channel = MagicMock(spec=discord.TextChannel)
 
-        # The command checks Config.DEEPSEEK_API_KEY before doing anything else.
+        # The command checks Config.DEEPSEEK_API_KEY before deferring, so the
+        # error is a private (ephemeral) initial response, not a follow-up.
         with (
             patch("commands.tldr_command.Config.DEEPSEEK_API_KEY", None),
             patch("commands.tldr_command.openai.AsyncOpenAI", return_value=AsyncMock()),
         ):
             await self.cog.tldr.callback(self.cog, interaction, anzahl=50, zeit=None)
 
-        interaction.followup.send.assert_called_once_with(
+        interaction.response.send_message.assert_called_once_with(
             "❌ DeepSeek API-Schlüssel fehlt. TL;DR kann nicht genutzt werden.",
             ephemeral=True,
         )
+        interaction.response.defer.assert_not_called()
 
     async def test_tldr_non_text_channel_returns_error(self):
         interaction = MagicMock()
         interaction.response.defer = AsyncMock()
-        interaction.followup.send = AsyncMock()
+        interaction.response.send_message = AsyncMock()
         interaction.channel = MagicMock(spec=discord.DMChannel)
         await self.cog.tldr.callback(self.cog, interaction, anzahl=50, zeit=None)
-        interaction.followup.send.assert_called_once_with(
+        interaction.response.send_message.assert_called_once_with(
             "❌ Dieser Befehl funktioniert nur in Textkanälen.",
             ephemeral=True,
         )
+        interaction.response.defer.assert_not_called()
+
+    async def test_tldr_thread_channel_is_allowed(self):
+        interaction = MagicMock()
+        interaction.response.defer = AsyncMock()
+        interaction.followup.send = AsyncMock()
+        interaction.channel = MagicMock(spec=discord.Thread)
+
+        user = MagicMock()
+        user.bot = False
+        user.id = 55
+        user.display_name = "Threadi"
+        msg = MagicMock()
+        msg.author = user
+        msg.content = "im Thread"
+
+        async def mock_history(limit=100, after=None, oldest_first=False):
+            yield msg
+
+        interaction.channel.history = mock_history
+        self.db.get_tldr_opted_in_users.return_value = {55}
+
+        self.mock_ai_client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="- eine Zusammenfassung"))]
+            )
+        )
+
+        await self.cog.tldr.callback(self.cog, interaction, anzahl=10, zeit=None)
+
+        interaction.response.defer.assert_called_once_with(ephemeral=False)
+        embed = interaction.followup.send.call_args[1]["embed"]
+        self.assertIn("- eine Zusammenfassung", embed.description)
 
     async def test_tldr_summarizes_messages(self):
         interaction = MagicMock()
@@ -235,5 +270,64 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
         await self.cog.tldr.callback(self.cog, interaction, anzahl=5, zeit=None)
         interaction.followup.send.assert_called_once_with(
             "Keine Nachrichten gefunden, die zusammengefasst werden können.",
+            ephemeral=True,
+        )
+
+    async def test_tldr_all_skipped_prompts_optin(self):
+        interaction = MagicMock()
+        interaction.response.defer = AsyncMock()
+        interaction.followup.send = AsyncMock()
+        interaction.channel = MagicMock(spec=discord.TextChannel)
+
+        user = MagicMock()
+        user.bot = False
+        user.id = 99
+        user.display_name = "Nope"
+        msg = MagicMock()
+        msg.author = user
+        msg.content = "hallo"
+
+        async def mock_history(limit=100, after=None, oldest_first=False):
+            yield msg
+
+        interaction.channel.history = mock_history
+        # Nobody opted in, so every message is filtered out.
+        self.db.get_tldr_opted_in_users.return_value = set()
+
+        await self.cog.tldr.callback(self.cog, interaction, anzahl=10, zeit=None)
+
+        sent_text = interaction.followup.send.call_args[0][0]
+        self.assertIn("/tldr_optin", sent_text)
+        self.assertTrue(interaction.followup.send.call_args[1]["ephemeral"])
+
+    async def test_tldr_empty_ai_response_reports_error(self):
+        interaction = MagicMock()
+        interaction.response.defer = AsyncMock()
+        interaction.followup.send = AsyncMock()
+        interaction.channel = MagicMock(spec=discord.TextChannel)
+
+        user = MagicMock()
+        user.bot = False
+        user.id = 7
+        user.display_name = "Redner"
+        msg = MagicMock()
+        msg.author = user
+        msg.content = "etwas Sinnvolles"
+
+        async def mock_history(limit=100, after=None, oldest_first=False):
+            yield msg
+
+        interaction.channel.history = mock_history
+        self.db.get_tldr_opted_in_users.return_value = {7}
+
+        # An empty choices list must not crash; it surfaces as a handled error.
+        self.mock_ai_client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(choices=[])
+        )
+
+        await self.cog.tldr.callback(self.cog, interaction, anzahl=10, zeit=None)
+
+        interaction.followup.send.assert_called_once_with(
+            "⚠️ Beim Erstellen der Zusammenfassung ist ein Fehler aufgetreten.",
             ephemeral=True,
         )

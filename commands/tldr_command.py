@@ -26,6 +26,10 @@ class TldrCommand(commands.Cog):
         name="tldr",
         description="Fasse die letzten Nachrichten dieses Channels zusammen.",
     )
+    @app_commands.describe(
+        anzahl="Wie viele der letzten Nachrichten durchsucht werden (5–200)",
+        zeit="Optional auf die letzte Stunde oder 24 Stunden beschränken",
+    )
     @app_commands.choices(
         zeit=[
             app_commands.Choice(name="Letzte Stunde", value="1h"),
@@ -35,26 +39,28 @@ class TldrCommand(commands.Cog):
     async def tldr(
         self,
         interaction: discord.Interaction,
-        anzahl: int = 50,
+        anzahl: app_commands.Range[int, 5, 200] = 50,
         zeit: Optional[str] = None,
     ):
         """Summarize recent messages of this channel."""
-        await interaction.response.defer(ephemeral=False)
-
+        # Validate synchronously first so these errors stay private; only
+        # defer (which posts a public placeholder) once we know we'll work.
         if not Config.DEEPSEEK_API_KEY:
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 "❌ DeepSeek API-Schlüssel fehlt. TL;DR kann nicht genutzt werden.",
                 ephemeral=True,
             )
             return
 
         channel = interaction.channel
-        if not isinstance(channel, discord.TextChannel):
-            await interaction.followup.send(
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            await interaction.response.send_message(
                 "❌ Dieser Befehl funktioniert nur in Textkanälen.",
                 ephemeral=True,
             )
             return
+
+        await interaction.response.defer(ephemeral=False)
 
         limit = max(5, min(anzahl, 200))
         after = None
@@ -74,6 +80,9 @@ class TldrCommand(commands.Cog):
                 limit=limit, after=after, oldest_first=False
             ):
                 if msg.author.bot:
+                    continue
+                # Nothing to summarize for attachment-/embed-/sticker-only posts.
+                if not msg.content.strip():
                     continue
                 # /tldr is opt-in only: skip anyone who hasn't explicitly
                 # opted in to having their messages summarized.
@@ -207,7 +216,11 @@ class TldrCommand(commands.Cog):
                 temperature=0.5,
                 timeout=30,
             )
-            return response.choices[0].message.content.strip()
+            if response.choices and response.choices[0].message:
+                content = response.choices[0].message.content
+                if content:
+                    return content.strip()
+            raise ValueError("DeepSeek returned an empty summary")
         except Exception as e:
             logger.error(f"DeepSeek summarization failed: {e}")
             raise
