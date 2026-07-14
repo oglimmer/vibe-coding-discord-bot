@@ -64,10 +64,10 @@ class TldrCommand(commands.Cog):
             after = discord.utils.utcnow() - timedelta(hours=24)
 
         try:
-            opted_out = self.db_manager.get_tldr_opted_out_users()
+            opted_in = self.db_manager.get_tldr_opted_in_users()
 
             messages = []
-            skipped_optout = 0
+            skipped_no_optin = 0
             # Always fetch newest-first so a limit keeps the *most recent*
             # messages (also relevant when `after` is set for time windows).
             async for msg in channel.history(
@@ -75,16 +75,27 @@ class TldrCommand(commands.Cog):
             ):
                 if msg.author.bot:
                     continue
-                if msg.author.id in opted_out:
-                    skipped_optout += 1
+                # /tldr is opt-in only: skip anyone who hasn't explicitly
+                # opted in to having their messages summarized.
+                if msg.author.id not in opted_in:
+                    skipped_no_optin += 1
                     continue
                 messages.append(msg)
 
             if not messages:
-                await interaction.followup.send(
-                    "Keine Nachrichten gefunden, die zusammengefasst werden können.",
-                    ephemeral=True,
-                )
+                if skipped_no_optin:
+                    await interaction.followup.send(
+                        "Keine Nachrichten zum Zusammenfassen: Niemand mit "
+                        "Nachrichten in diesem Zeitraum hat `/tldr_optin` "
+                        "aktiviert. Nur Nachrichten von Nutzern mit Opt-in "
+                        "werden zusammengefasst.",
+                        ephemeral=True,
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Keine Nachrichten gefunden, die zusammengefasst werden können.",
+                        ephemeral=True,
+                    )
                 return
 
             # Build a combined text to send to the AI. History is newest-first,
@@ -113,8 +124,8 @@ class TldrCommand(commands.Cog):
                 color=discord.Color.blue(),
             )
             footer = f"Basierend auf {used_messages} Nachrichten"
-            if skipped_optout:
-                footer += f" · {skipped_optout} ausgeschlossen (Opt-out)"
+            if skipped_no_optin:
+                footer += f" · {skipped_no_optin} ausgeschlossen (kein Opt-in)"
             embed.set_footer(text=footer)
             await interaction.followup.send(embed=embed)
         except Exception as e:
@@ -125,17 +136,21 @@ class TldrCommand(commands.Cog):
             )
 
     @app_commands.command(
-        name="tldr_optout",
-        description="Schließe deine Nachrichten von /tldr-Zusammenfassungen aus.",
+        name="tldr_optin",
+        description="Erlaube, dass deine Nachrichten in /tldr zusammengefasst werden.",
     )
-    async def tldr_optout(self, interaction: discord.Interaction):
-        """Exclude the invoking user's messages from future /tldr summaries."""
-        ok = self.db_manager.set_tldr_optout(interaction.user.id, True)
+    async def tldr_optin(self, interaction: discord.Interaction):
+        """Include the invoking user's messages in future /tldr summaries.
+
+        /tldr is opt-in only, so nothing of a user's is summarized until they
+        run this command.
+        """
+        ok = self.db_manager.set_tldr_optin(interaction.user.id, True)
         if ok:
             await interaction.response.send_message(
-                "🔕 Deine Nachrichten werden ab jetzt aus /tldr-Zusammenfassungen "
-                "ausgeschlossen und nicht mehr an die KI gesendet. "
-                "Mit `/tldr_optin` kannst du das rückgängig machen.",
+                "🔔 Deine Nachrichten können ab jetzt in /tldr-Zusammenfassungen "
+                "einfließen und werden dafür an die KI gesendet. "
+                "Mit `/tldr_optout` kannst du das wieder rückgängig machen.",
                 ephemeral=True,
             )
         else:
@@ -146,15 +161,20 @@ class TldrCommand(commands.Cog):
             )
 
     @app_commands.command(
-        name="tldr_optin",
-        description="Erlaube wieder, dass deine Nachrichten in /tldr zusammengefasst werden.",
+        name="tldr_optout",
+        description="Schließe deine Nachrichten wieder von /tldr-Zusammenfassungen aus.",
     )
-    async def tldr_optin(self, interaction: discord.Interaction):
-        """Re-include the invoking user's messages in /tldr summaries."""
-        ok = self.db_manager.set_tldr_optout(interaction.user.id, False)
+    async def tldr_optout(self, interaction: discord.Interaction):
+        """Exclude the invoking user's messages from /tldr summaries again.
+
+        This is the default state; the command exists to undo a prior
+        /tldr_optin.
+        """
+        ok = self.db_manager.set_tldr_optin(interaction.user.id, False)
         if ok:
             await interaction.response.send_message(
-                "🔔 Deine Nachrichten können wieder in /tldr-Zusammenfassungen einfließen.",
+                "🔕 Deine Nachrichten werden aus /tldr-Zusammenfassungen "
+                "ausgeschlossen und nicht mehr an die KI gesendet.",
                 ephemeral=True,
             )
         else:
