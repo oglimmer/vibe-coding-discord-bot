@@ -10,8 +10,9 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bot = MagicMock()
         self.db = MagicMock()
-        # By default nobody has opted out of /tldr summarization.
-        self.db.get_tldr_opted_out_users.return_value = set()
+        # /tldr is opt-in only. Tests that expect messages to be summarized
+        # set their authors' ids here explicitly.
+        self.db.get_tldr_opted_in_users.return_value = set()
         self.deepseek_key = "fake-key"
         # patching during each test is clearer; reset per test.
         self.mock_ai_client = AsyncMock()
@@ -79,6 +80,7 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
             yield fake_msg2
 
         interaction.channel.history = mock_history
+        self.db.get_tldr_opted_in_users.return_value = {111}
 
         self.mock_ai_client.chat.completions.create = AsyncMock()
         self.mock_ai_client.chat.completions.create.return_value = MagicMock(
@@ -128,6 +130,7 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
             yield fresh_msg
 
         interaction.channel.history = mock_history
+        self.db.get_tldr_opted_in_users.return_value = {222}
 
         self.mock_ai_client.chat.completions.create = AsyncMock()
         self.mock_ai_client.chat.completions.create.return_value = MagicMock(
@@ -144,7 +147,7 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
         embed = interaction.followup.send.call_args[1]["embed"]
         self.assertIn("Basierend auf 1 Nachrichten", embed.footer.text)
 
-    async def test_tldr_excludes_opted_out_users(self):
+    async def test_tldr_includes_only_opted_in_users(self):
         interaction = MagicMock()
         interaction.response.defer = AsyncMock()
         interaction.followup.send = AsyncMock()
@@ -155,17 +158,17 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
         included_user.id = 1
         included_user.display_name = "Bleibt"
 
-        opted_out_user = MagicMock()
-        opted_out_user.bot = False
-        opted_out_user.id = 2
-        opted_out_user.display_name = "Raus"
+        not_opted_in_user = MagicMock()
+        not_opted_in_user.bot = False
+        not_opted_in_user.id = 2
+        not_opted_in_user.display_name = "Raus"
 
         included_msg = MagicMock()
         included_msg.author = included_user
         included_msg.content = "sichtbar"
 
         excluded_msg = MagicMock()
-        excluded_msg.author = opted_out_user
+        excluded_msg.author = not_opted_in_user
         excluded_msg.content = "geheim"
 
         async def mock_history(limit=100, after=None, oldest_first=False):
@@ -173,7 +176,8 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
             yield excluded_msg
 
         interaction.channel.history = mock_history
-        self.db.get_tldr_opted_out_users.return_value = {2}
+        # Only user 1 has opted in; user 2 must be excluded by default.
+        self.db.get_tldr_opted_in_users.return_value = {1}
 
         self.mock_ai_client.chat.completions.create = AsyncMock()
         self.mock_ai_client.chat.completions.create.return_value = MagicMock(
@@ -193,27 +197,27 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Basierend auf 1 Nachrichten", embed.footer.text)
         self.assertIn("1 ausgeschlossen", embed.footer.text)
 
-    async def test_tldr_optout_persists_preference(self):
-        interaction = MagicMock()
-        interaction.user.id = 42
-        interaction.response.send_message = AsyncMock()
-        self.db.set_tldr_optout.return_value = True
-
-        await self.cog.tldr_optout.callback(self.cog, interaction)
-
-        self.db.set_tldr_optout.assert_called_once_with(42, True)
-        interaction.response.send_message.assert_called_once()
-        self.assertTrue(interaction.response.send_message.call_args[1]["ephemeral"])
-
     async def test_tldr_optin_persists_preference(self):
         interaction = MagicMock()
         interaction.user.id = 42
         interaction.response.send_message = AsyncMock()
-        self.db.set_tldr_optout.return_value = True
+        self.db.set_tldr_optin.return_value = True
 
         await self.cog.tldr_optin.callback(self.cog, interaction)
 
-        self.db.set_tldr_optout.assert_called_once_with(42, False)
+        self.db.set_tldr_optin.assert_called_once_with(42, True)
+        interaction.response.send_message.assert_called_once()
+        self.assertTrue(interaction.response.send_message.call_args[1]["ephemeral"])
+
+    async def test_tldr_optout_persists_preference(self):
+        interaction = MagicMock()
+        interaction.user.id = 42
+        interaction.response.send_message = AsyncMock()
+        self.db.set_tldr_optin.return_value = True
+
+        await self.cog.tldr_optout.callback(self.cog, interaction)
+
+        self.db.set_tldr_optin.assert_called_once_with(42, False)
         interaction.response.send_message.assert_called_once()
 
     async def test_tldr_no_messages(self):

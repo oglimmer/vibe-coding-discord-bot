@@ -154,7 +154,7 @@ class DatabaseManager:
             """)
 
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tldr_optouts (
+                CREATE TABLE IF NOT EXISTS tldr_optins (
                     user_id BIGINT PRIMARY KEY,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -1103,16 +1103,20 @@ class DatabaseManager:
             if connection:
                 connection.close()
 
-    def set_tldr_optout(self, user_id, opted_out):
-        """Opt a user out of (or back into) having their messages summarized by /tldr."""
+    def set_tldr_optin(self, user_id, opted_in):
+        """Opt a user in to (or back out of) having their messages summarized by /tldr.
+
+        /tldr is opt-in only: a user's messages are excluded from summaries
+        unless they have an explicit opt-in row here.
+        """
         connection = None
         try:
             connection = self._get_connection()
             cursor = connection.cursor()
-            if opted_out:
+            if opted_in:
                 cursor.execute(
                     """
-                    INSERT INTO tldr_optouts (user_id)
+                    INSERT INTO tldr_optins (user_id)
                     VALUES (?)
                     ON DUPLICATE KEY UPDATE user_id = user_id
                 """,
@@ -1120,49 +1124,49 @@ class DatabaseManager:
                 )
             else:
                 cursor.execute(
-                    "DELETE FROM tldr_optouts WHERE user_id = ?",
+                    "DELETE FROM tldr_optins WHERE user_id = ?",
                     (user_id,),
                 )
 
             connection.commit()
-            status = "opted out of" if opted_out else "opted back into"
+            status = "opted in to" if opted_in else "opted back out of"
             logger.info(f"User {user_id} {status} /tldr summarization")
             return True
         except mariadb.Error as e:
-            logger.error(f"Error setting tldr opt-out: {e}")
+            logger.error(f"Error setting tldr opt-in: {e}")
             return False
         finally:
             if connection:
                 connection.close()
 
-    def is_tldr_opted_out(self, user_id):
-        """Return True if the user has opted out of /tldr summarization."""
+    def is_tldr_opted_in(self, user_id):
+        """Return True if the user has opted in to /tldr summarization."""
         connection = None
         try:
             connection = self._get_connection()
             cursor = connection.cursor()
             cursor.execute(
-                "SELECT 1 FROM tldr_optouts WHERE user_id = ?",
+                "SELECT 1 FROM tldr_optins WHERE user_id = ?",
                 (user_id,),
             )
             return cursor.fetchone() is not None
         except mariadb.Error as e:
-            logger.error(f"Error fetching tldr opt-out: {e}")
+            logger.error(f"Error fetching tldr opt-in: {e}")
             return False
         finally:
             if connection:
                 connection.close()
 
-    def get_tldr_opted_out_users(self):
-        """Return the set of user_ids that have opted out of /tldr summarization."""
+    def get_tldr_opted_in_users(self):
+        """Return the set of user_ids that have opted in to /tldr summarization."""
         connection = None
         try:
             connection = self._get_connection()
             cursor = connection.cursor()
-            cursor.execute("SELECT user_id FROM tldr_optouts")
+            cursor.execute("SELECT user_id FROM tldr_optins")
             return {row[0] for row in cursor.fetchall()}
         except mariadb.Error as e:
-            logger.error(f"Error fetching tldr opt-out list: {e}")
+            logger.error(f"Error fetching tldr opt-in list: {e}")
             return set()
         finally:
             if connection:
