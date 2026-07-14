@@ -134,6 +134,12 @@ env:
   POSTILLON_DELIVERY_DELAY_SECONDS: "1"
   POSTILLON_LEASE_SECONDS: "1800"
 
+  # TL;DR Message Summarization (/tldr) - uses DeepSeek. The TLDR_ENABLED flag
+  # and the shared DEEPSEEK_API_KEY secret are injected separately, gated on
+  # .Values.tldr.enabled (see the tldr block below).
+  TLDR_MODEL: "deepseek-chat"
+  DEEPSEEK_BASE_URL: "https://api.deepseek.com"
+
 # Secrets configuration - using SealedSecrets
 secrets:
   # These should remain empty in values.yaml - secrets come from SealedSecret
@@ -154,4 +160,9 @@ sealedSecrets:
 # Requires DEEPSEEK_API_KEY and VIBECODE_GITHUB_TOKEN in the sealed secret;
 # also adds RBAC so the bot can run worker Jobs in its namespace.
 vibecode:
+  enabled: true
+
+# TL;DR: /tldr summarizes recent channel messages via DeepSeek (opt-in only).
+# Requires DEEPSEEK_API_KEY in the sealed secret (shared with vibecode).
+tldr:
   enabled: true
