@@ -48,7 +48,7 @@ class AboutCommand(commands.Cog):
 
         embed.add_field(
             name="Purpose",
-            value="Vibe Coding — a bot that extends itself via Discord\n*Claude Code framework · DeepSeek model*",
+            value="1337 Game & Greeting Management\n*Most sophisticated in Discord VibeCoding*",
             inline=True,
         )
 

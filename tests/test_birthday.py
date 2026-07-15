@@ -10,6 +10,7 @@ class TestBirthdaySetCommand(unittest.TestCase):
     def test_birthday_set_valid_date(self):
         async def async_test():
             bot = MagicMock()
+            bot.wait_until_ready = AsyncMock()
             db_manager = MagicMock()
             db_manager.set_birthday = MagicMock(return_value=True)
             bot.db_manager = db_manager
@@ -48,6 +49,7 @@ class TestBirthdaySetCommand(unittest.TestCase):
     def test_birthday_set_valid_date_no_guild(self):
         async def async_test():
             bot = MagicMock()
+            bot.wait_until_ready = AsyncMock()
             db_manager = MagicMock()
             db_manager.set_birthday = MagicMock(return_value=True)
             bot.db_manager = db_manager
@@ -74,6 +76,7 @@ class TestBirthdaySetCommand(unittest.TestCase):
     def test_birthday_set_invalid_format(self):
         async def async_test():
             bot = MagicMock()
+            bot.wait_until_ready = AsyncMock()
             db_manager = MagicMock()
             bot.db_manager = db_manager
 
@@ -101,6 +104,7 @@ class TestBirthdaySetCommand(unittest.TestCase):
     def test_birthday_set_future_date(self):
         async def async_test():
             bot = MagicMock()
+            bot.wait_until_ready = AsyncMock()
             db_manager = MagicMock()
             bot.db_manager = db_manager
 
@@ -127,6 +131,7 @@ class TestBirthdaySetCommand(unittest.TestCase):
     def test_birthday_set_db_error(self):
         async def async_test():
             bot = MagicMock()
+            bot.wait_until_ready = AsyncMock()
             db_manager = MagicMock()
             db_manager.set_birthday = MagicMock(return_value=False)
             bot.db_manager = db_manager
@@ -154,22 +159,33 @@ class TestBirthdaySetCommand(unittest.TestCase):
 class TestBirthdayDailyCheck(unittest.TestCase):
     def setUp(self):
         self.bot = MagicMock()
+        self.bot.wait_until_ready = AsyncMock()
         self.db_manager = MagicMock()
         self.bot.db_manager = self.db_manager
         self.channel = MagicMock()
         self.channel.send = AsyncMock()
         self.bot.get_channel.return_value = self.channel
 
+    def _make_cog(self):
+        """Create a cog and immediately cancel its loop.
+
+        The loop is cancelled so the background asyncio task does not fire
+        during the test.  Tests exercise the method via ``await cog.daily_check()``
+        which goes through the public ``Loop.__call__`` API (including its
+        ``_injected`` mechanism that binds the cog instance).
+        """
+        cog = BirthdayCommand(self.bot, self.db_manager)
+        cog.daily_check.cancel()
+        return cog
+
     def test_daily_check_not_8am_skips(self):
         async def async_test():
-            cog = BirthdayCommand(self.bot, self.db_manager)
-            cog.daily_check.cancel()
+            cog = self._make_cog()
 
             fake_now = datetime.datetime(2025, 7, 15, 9, 30, 0, tzinfo=GERMANY_TZ)
             with patch("commands.birthday_command.dt") as mock_dt:
                 mock_dt.datetime.now.return_value = fake_now
-                mock_dt.datetime.strptime = datetime.datetime.strptime
-                await cog.daily_check.coro(cog)
+                await cog.daily_check()
 
             self.db_manager.get_birthdays_for_today.assert_not_called()
             self.channel.send.assert_not_called()
@@ -178,8 +194,7 @@ class TestBirthdayDailyCheck(unittest.TestCase):
 
     def test_daily_check_at_8am_sends_greetings(self):
         async def async_test():
-            cog = BirthdayCommand(self.bot, self.db_manager)
-            cog.daily_check.cancel()
+            cog = self._make_cog()
 
             self.db_manager.get_birthdays_for_today.return_value = [
                 {
@@ -197,11 +212,10 @@ class TestBirthdayDailyCheck(unittest.TestCase):
             fake_now = datetime.datetime(2025, 7, 15, 8, 0, 0, tzinfo=GERMANY_TZ)
             with patch("commands.birthday_command.dt") as mock_dt:
                 mock_dt.datetime.now.return_value = fake_now
-                mock_dt.datetime.strptime = datetime.datetime.strptime
                 with patch("commands.birthday_command.Config") as mock_config:
                     mock_config.BIRTHDAY_CHANNEL_ID = 12345
                     mock_config.ANNOUNCEMENT_CHANNEL_ID = None
-                    await cog.daily_check.coro(cog)
+                    await cog.daily_check()
 
             self.db_manager.get_birthdays_for_today.assert_called_once()
             self.channel.send.assert_called_once()
@@ -214,16 +228,13 @@ class TestBirthdayDailyCheck(unittest.TestCase):
 
     def test_daily_check_skips_when_already_announced(self):
         async def async_test():
-            cog = BirthdayCommand(self.bot, self.db_manager)
-            cog.daily_check.cancel()
-
+            cog = self._make_cog()
             cog._last_announced_date = datetime.date(2025, 7, 15)
 
             fake_now = datetime.datetime(2025, 7, 15, 8, 0, 0, tzinfo=GERMANY_TZ)
             with patch("commands.birthday_command.dt") as mock_dt:
                 mock_dt.datetime.now.return_value = fake_now
-                mock_dt.datetime.strptime = datetime.datetime.strptime
-                await cog.daily_check.coro(cog)
+                await cog.daily_check()
 
             self.db_manager.get_birthdays_for_today.assert_not_called()
             self.channel.send.assert_not_called()
@@ -232,19 +243,19 @@ class TestBirthdayDailyCheck(unittest.TestCase):
 
     def test_daily_check_no_channel_configured(self):
         async def async_test():
-            cog = BirthdayCommand(self.bot, self.db_manager)
-            cog.daily_check.cancel()
+            cog = self._make_cog()
 
+            # Simulate: channel ID is configured but the channel no longer
+            # exists on the server.
             self.bot.get_channel.return_value = None
 
             fake_now = datetime.datetime(2025, 7, 15, 8, 0, 0, tzinfo=GERMANY_TZ)
             with patch("commands.birthday_command.dt") as mock_dt:
                 mock_dt.datetime.now.return_value = fake_now
-                mock_dt.datetime.strptime = datetime.datetime.strptime
                 with patch("commands.birthday_command.Config") as mock_config:
                     mock_config.BIRTHDAY_CHANNEL_ID = 12345
                     mock_config.ANNOUNCEMENT_CHANNEL_ID = None
-                    await cog.daily_check.coro(cog)
+                    await cog.daily_check()
 
             self.channel.send.assert_not_called()
 
@@ -252,41 +263,57 @@ class TestBirthdayDailyCheck(unittest.TestCase):
 
     def test_daily_check_no_birthdays_today(self):
         async def async_test():
-            cog = BirthdayCommand(self.bot, self.db_manager)
-            cog.daily_check.cancel()
+            cog = self._make_cog()
 
             self.db_manager.get_birthdays_for_today.return_value = []
 
             fake_now = datetime.datetime(2025, 7, 15, 8, 0, 0, tzinfo=GERMANY_TZ)
             with patch("commands.birthday_command.dt") as mock_dt:
                 mock_dt.datetime.now.return_value = fake_now
-                mock_dt.datetime.strptime = datetime.datetime.strptime
                 with patch("commands.birthday_command.Config") as mock_config:
                     mock_config.BIRTHDAY_CHANNEL_ID = 12345
                     mock_config.ANNOUNCEMENT_CHANNEL_ID = None
-                    await cog.daily_check.coro(cog)
+                    await cog.daily_check()
 
             self.db_manager.get_birthdays_for_today.assert_called_once()
             self.channel.send.assert_not_called()
 
         asyncio.run(async_test())
 
-    def test_age_computation(self):
-        """Test the _compute_age_text static method directly."""
-        with patch("commands.birthday_command.dt") as mock_dt:
-            mock_dt.datetime.now.return_value = datetime.datetime(
-                2025, 7, 15, 8, 0, 0, tzinfo=GERMANY_TZ
-            )
+    def test_age_computation_with_explicit_today(self):
+        """Test _compute_age_text with an explicit ``today`` parameter.
 
-            # Age 35
-            bday = datetime.date(1990, 7, 15)
-            text = BirthdayCommand._compute_age_text(bday)
-            self.assertIn("35 Jahre", text)
+        No mocking needed — the optional ``today`` parameter makes the method
+        directly testable.
+        """
+        # Age 35
+        bday = datetime.date(1990, 7, 15)
+        today = datetime.date(2025, 7, 15)
+        text = BirthdayCommand._compute_age_text(bday, today=today)
+        self.assertIn("35 Jahre", text)
 
-            # Age 0 (born today)
-            bday_today = datetime.date(2025, 7, 15)
-            text = BirthdayCommand._compute_age_text(bday_today)
-            self.assertIn("Herzlich willkommen", text)
+        # Age 0 (born today)
+        bday_today = datetime.date(2025, 7, 15)
+        text = BirthdayCommand._compute_age_text(bday_today, today=today)
+        self.assertIn("Herzlich willkommen", text)
+
+        # Birthday later in the year — age is one less
+        bday_dec = datetime.date(1990, 12, 1)
+        text = BirthdayCommand._compute_age_text(bday_dec, today=today)
+        self.assertIn("34 Jahre", text)
+
+    def test_age_computation_runs_without_today(self):
+        """Smoke test: _compute_age_text works without explicit today (uses real clock)."""
+        bday = datetime.date(2000, 1, 1)
+        text = BirthdayCommand._compute_age_text(bday)
+        # The result depends on the actual date but must be a non-empty string.
+        self.assertIsInstance(text, str)
+        self.assertTrue(len(text) > 0)
+
+    def test_age_computation_none_birthday(self):
+        """_compute_age_text returns empty string for None birthday."""
+        text = BirthdayCommand._compute_age_text(None)
+        self.assertEqual(text, "")
 
     def test_birthday_messages_vary(self):
         """Ensure that the message list offers some variation."""
