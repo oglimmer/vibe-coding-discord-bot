@@ -6,17 +6,6 @@ from dotenv import load_dotenv
 load_dotenv(override=False)
 
 
-def _defensive_int(value):
-    """Convert *value* to int, or return None with a warning on failure."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        logging.getLogger(__name__).warning(
-            "Cannot parse %r as int — treating as unset", value
-        )
-        return None
-
-
 class Config:
     DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
     DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -120,7 +109,7 @@ class Config:
 
     # Birthday greeting configuration
     BIRTHDAY_CHANNEL_ID = (
-        _defensive_int(os.getenv("BIRTHDAY_CHANNEL_ID"))
+        int(os.getenv("BIRTHDAY_CHANNEL_ID", 0))
         if os.getenv("BIRTHDAY_CHANNEL_ID")
         else None
     )

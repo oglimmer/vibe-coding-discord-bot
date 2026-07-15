@@ -11,6 +11,7 @@ A professional Discord bot written in Python 3.12 that responds to greetings wit
 - **Reaction-Based Fact Checking**: Users can react with 🔍 emoji to any message to request a detailed fact-check with numerical scoring (0-9 scale)
 - **Vibecode (self-extending bot)**: `/vibecode` spawns a Kubernetes Job in which an agentic coding AI (Claude Code + DeepSeek) implements the requested feature in this repository, verifies it with the test suite and ruff, opens a pull request, and works through the AI reviewer's findings until it is approved
 - **Postillon RSS archive**: Polls for new Postillon articles every 15 minutes, stores them in MariaDB, and publishes new entries as Discord embeds
+- **Birthday greetings**: `/birthday-set` stores a birthday, and the bot congratulates the user at 08:00 (Europe/Berlin) with a randomly varied message
 - **Professional Architecture**: Extensible command and message handler system
 - **Comprehensive Logging**: Detailed logging for monitoring and debugging
 - **Database Management**: Professional MariaDB integration with proper connection handling
@@ -255,6 +256,27 @@ Available Postillon commands after Discord has synchronized the command tree:
 - `/postillon amount:10`: browse recent stored articles
 - `/postillon_status`: show import and delivery status
 - `/postillon_sync`: manually import now; requires `Manage Server`
+
+### Birthday Greetings
+
+```env
+# Channel for the greetings; falls back to ANNOUNCEMENT_CHANNEL_ID when unset
+BIRTHDAY_CHANNEL_ID=
+```
+
+The bot posts a greeting at 08:00 Europe/Berlin, picking one of several
+messages so the same person is not congratulated identically every year. If
+neither `BIRTHDAY_CHANNEL_ID` nor `ANNOUNCEMENT_CHANNEL_ID` is set, greetings
+are skipped and a warning is logged at startup.
+
+Available birthday commands:
+
+- `/birthday-set datum:15-07-1990`: store your birthday, format `dd-mm-yyyy`
+- `/birthday-remove`: delete your stored birthday
+
+Birthdays are stored per server, so a user in several servers is greeted in
+each one and can remove the entry per server. Both commands only work inside a
+server, not in DMs.
 
 ## Database Schema
 
