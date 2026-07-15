@@ -3,7 +3,11 @@ import datetime
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import discord
+
 from commands.birthday_command import BirthdayCommand, GERMANY_TZ
+
+TODAY = datetime.date(2025, 7, 15)
 
 
 class TestBirthdaySetCommand(unittest.TestCase):
@@ -41,7 +45,7 @@ class TestBirthdaySetCommand(unittest.TestCase):
             _, kwargs = interaction.followup.send.call_args
             embed = kwargs.get("embed")
             self.assertIsNotNone(embed)
-            self.assertEqual(embed.color.value, discord_color_green())
+            self.assertEqual(embed.color.value, discord.Color.green().value)
             self.assertIn("Geburtstag gespeichert", embed.title)
 
         asyncio.run(async_test())
@@ -156,11 +160,12 @@ class TestBirthdaySetCommand(unittest.TestCase):
         asyncio.run(async_test())
 
 
-class TestBirthdayDailyCheck(unittest.TestCase):
+class TestBirthdayAnnouncements(unittest.TestCase):
     def setUp(self):
         self.bot = MagicMock()
         self.bot.wait_until_ready = AsyncMock()
         self.db_manager = MagicMock()
+        self.db_manager.try_claim_birthday_announcement.return_value = True
         self.bot.db_manager = self.db_manager
         self.channel = MagicMock()
         self.channel.send = AsyncMock()
@@ -170,116 +175,237 @@ class TestBirthdayDailyCheck(unittest.TestCase):
         """Create a cog and immediately cancel its loop.
 
         The loop is cancelled so the background asyncio task does not fire
-        during the test.  Tests exercise the method via ``await cog.daily_check()``
-        which goes through the public ``Loop.__call__`` API (including its
-        ``_injected`` mechanism that binds the cog instance).
+        during the test.  Tests drive ``_announce_birthdays`` directly with an
+        explicit date, which needs no clock patching.
         """
         cog = BirthdayCommand(self.bot, self.db_manager)
         cog.daily_check.cancel()
         return cog
 
-    def test_daily_check_not_8am_skips(self):
+    def _birthday_row(self, user_id=555, username="Geburtstagskind"):
+        return {
+            "user_id": user_id,
+            "username": username,
+            "birthday": datetime.date(1990, 7, 15),
+            "server_id": 1,
+        }
+
+    def _mention_user(self, mention="<@555>"):
+        fake_user = MagicMock()
+        fake_user.mention = mention
+        self.bot.get_user.return_value = fake_user
+        return fake_user
+
+    def test_announces_todays_birthdays(self):
         async def async_test():
             cog = self._make_cog()
-
-            fake_now = datetime.datetime(2025, 7, 15, 9, 30, 0, tzinfo=GERMANY_TZ)
-            with patch("commands.birthday_command.dt") as mock_dt:
-                mock_dt.datetime.now.return_value = fake_now
-                await cog.daily_check()
-
-            self.db_manager.get_birthdays_for_today.assert_not_called()
-            self.channel.send.assert_not_called()
-
-        asyncio.run(async_test())
-
-    def test_daily_check_at_8am_sends_greetings(self):
-        async def async_test():
-            cog = self._make_cog()
-
             self.db_manager.get_birthdays_for_today.return_value = [
-                {
-                    "user_id": 555,
-                    "username": "Geburtstagskind",
-                    "birthday": datetime.date(1990, 7, 15),
-                    "server_id": 1,
-                }
+                self._birthday_row()
             ]
+            self._mention_user()
 
-            fake_user = MagicMock()
-            fake_user.mention = "<@555>"
-            self.bot.get_user.return_value = fake_user
+            with patch("commands.birthday_command.Config") as mock_config:
+                mock_config.BIRTHDAY_CHANNEL_ID = 12345
+                mock_config.ANNOUNCEMENT_CHANNEL_ID = None
+                await cog._announce_birthdays(TODAY)
 
-            fake_now = datetime.datetime(2025, 7, 15, 8, 0, 0, tzinfo=GERMANY_TZ)
-            with patch("commands.birthday_command.dt") as mock_dt:
-                mock_dt.datetime.now.return_value = fake_now
-                with patch("commands.birthday_command.Config") as mock_config:
-                    mock_config.BIRTHDAY_CHANNEL_ID = 12345
-                    mock_config.ANNOUNCEMENT_CHANNEL_ID = None
-                    await cog.daily_check()
-
-            self.db_manager.get_birthdays_for_today.assert_called_once()
+            self.db_manager.get_birthdays_for_today.assert_called_once_with(TODAY)
+            self.db_manager.try_claim_birthday_announcement.assert_called_once_with(
+                TODAY
+            )
             self.channel.send.assert_called_once()
             _, kwargs = self.channel.send.call_args
             embed = kwargs.get("embed")
             self.assertIsNotNone(embed)
             self.assertIn("Geburtstag", embed.title)
+            self.db_manager.release_birthday_announcement.assert_not_called()
 
         asyncio.run(async_test())
 
-    def test_daily_check_skips_when_already_announced(self):
+    def test_skips_when_the_day_is_already_claimed(self):
+        """A second run on the same day — e.g. after a restart — stays quiet."""
+
         async def async_test():
             cog = self._make_cog()
-            cog._last_announced_date = datetime.date(2025, 7, 15)
+            self.db_manager.get_birthdays_for_today.return_value = [
+                self._birthday_row()
+            ]
+            self.db_manager.try_claim_birthday_announcement.return_value = False
+            self._mention_user()
 
-            fake_now = datetime.datetime(2025, 7, 15, 8, 0, 0, tzinfo=GERMANY_TZ)
-            with patch("commands.birthday_command.dt") as mock_dt:
-                mock_dt.datetime.now.return_value = fake_now
-                await cog.daily_check()
+            with patch("commands.birthday_command.Config") as mock_config:
+                mock_config.BIRTHDAY_CHANNEL_ID = 12345
+                mock_config.ANNOUNCEMENT_CHANNEL_ID = None
+                await cog._announce_birthdays(TODAY)
+
+            self.channel.send.assert_not_called()
+
+        asyncio.run(async_test())
+
+    def test_no_channel_configured_leaves_day_unclaimed(self):
+        async def async_test():
+            cog = self._make_cog()
+
+            with patch("commands.birthday_command.Config") as mock_config:
+                mock_config.BIRTHDAY_CHANNEL_ID = None
+                mock_config.ANNOUNCEMENT_CHANNEL_ID = None
+                await cog._announce_birthdays(TODAY)
 
             self.db_manager.get_birthdays_for_today.assert_not_called()
+            self.db_manager.try_claim_birthday_announcement.assert_not_called()
             self.channel.send.assert_not_called()
 
         asyncio.run(async_test())
 
-    def test_daily_check_no_channel_configured(self):
+    def test_missing_channel_leaves_day_unclaimed(self):
+        """Channel ID is configured but the channel is gone — retry later."""
+
         async def async_test():
             cog = self._make_cog()
-
-            # Simulate: channel ID is configured but the channel no longer
-            # exists on the server.
             self.bot.get_channel.return_value = None
 
-            fake_now = datetime.datetime(2025, 7, 15, 8, 0, 0, tzinfo=GERMANY_TZ)
-            with patch("commands.birthday_command.dt") as mock_dt:
-                mock_dt.datetime.now.return_value = fake_now
-                with patch("commands.birthday_command.Config") as mock_config:
-                    mock_config.BIRTHDAY_CHANNEL_ID = 12345
-                    mock_config.ANNOUNCEMENT_CHANNEL_ID = None
-                    await cog.daily_check()
+            with patch("commands.birthday_command.Config") as mock_config:
+                mock_config.BIRTHDAY_CHANNEL_ID = 12345
+                mock_config.ANNOUNCEMENT_CHANNEL_ID = None
+                await cog._announce_birthdays(TODAY)
 
+            self.db_manager.try_claim_birthday_announcement.assert_not_called()
             self.channel.send.assert_not_called()
 
         asyncio.run(async_test())
 
-    def test_daily_check_no_birthdays_today(self):
+    def test_no_birthdays_today(self):
         async def async_test():
             cog = self._make_cog()
-
             self.db_manager.get_birthdays_for_today.return_value = []
 
-            fake_now = datetime.datetime(2025, 7, 15, 8, 0, 0, tzinfo=GERMANY_TZ)
-            with patch("commands.birthday_command.dt") as mock_dt:
-                mock_dt.datetime.now.return_value = fake_now
-                with patch("commands.birthday_command.Config") as mock_config:
-                    mock_config.BIRTHDAY_CHANNEL_ID = 12345
-                    mock_config.ANNOUNCEMENT_CHANNEL_ID = None
-                    await cog.daily_check()
+            with patch("commands.birthday_command.Config") as mock_config:
+                mock_config.BIRTHDAY_CHANNEL_ID = 12345
+                mock_config.ANNOUNCEMENT_CHANNEL_ID = None
+                await cog._announce_birthdays(TODAY)
 
-            self.db_manager.get_birthdays_for_today.assert_called_once()
+            self.db_manager.get_birthdays_for_today.assert_called_once_with(TODAY)
+            self.db_manager.try_claim_birthday_announcement.assert_not_called()
             self.channel.send.assert_not_called()
 
         asyncio.run(async_test())
 
+    def test_claim_released_when_nothing_could_be_delivered(self):
+        async def async_test():
+            cog = self._make_cog()
+            self.db_manager.get_birthdays_for_today.return_value = [
+                self._birthday_row()
+            ]
+            self._mention_user()
+            self.channel.send.side_effect = RuntimeError("Discord is down")
+
+            with patch("commands.birthday_command.Config") as mock_config:
+                mock_config.BIRTHDAY_CHANNEL_ID = 12345
+                mock_config.ANNOUNCEMENT_CHANNEL_ID = None
+                await cog._announce_birthdays(TODAY)
+
+            self.db_manager.release_birthday_announcement.assert_called_once_with(TODAY)
+
+        asyncio.run(async_test())
+
+    def test_claim_kept_when_some_greetings_got_through(self):
+        """A partial send must not be retried — nobody gets greeted twice."""
+
+        async def async_test():
+            cog = self._make_cog()
+            self.db_manager.get_birthdays_for_today.return_value = [
+                self._birthday_row(user_id=555),
+                self._birthday_row(user_id=666, username="Zweiter"),
+            ]
+            self._mention_user()
+            self.channel.send.side_effect = [None, RuntimeError("Discord is down")]
+
+            with patch("commands.birthday_command.Config") as mock_config:
+                mock_config.BIRTHDAY_CHANNEL_ID = 12345
+                mock_config.ANNOUNCEMENT_CHANNEL_ID = None
+                await cog._announce_birthdays(TODAY)
+
+            self.db_manager.release_birthday_announcement.assert_not_called()
+
+        asyncio.run(async_test())
+
+    def test_unknown_user_is_skipped(self):
+        async def async_test():
+            cog = self._make_cog()
+            self.db_manager.get_birthdays_for_today.return_value = [
+                self._birthday_row()
+            ]
+            self.bot.get_user.return_value = None
+            self.bot.fetch_user = AsyncMock(
+                side_effect=discord.NotFound(MagicMock(status=404), "unknown user")
+            )
+
+            with patch("commands.birthday_command.Config") as mock_config:
+                mock_config.BIRTHDAY_CHANNEL_ID = 12345
+                mock_config.ANNOUNCEMENT_CHANNEL_ID = None
+                await cog._announce_birthdays(TODAY)
+
+            self.channel.send.assert_not_called()
+            self.db_manager.release_birthday_announcement.assert_called_once_with(TODAY)
+
+        asyncio.run(async_test())
+
+    def test_announcement_channel_used_as_fallback(self):
+        async def async_test():
+            cog = self._make_cog()
+            self.db_manager.get_birthdays_for_today.return_value = [
+                self._birthday_row()
+            ]
+            self._mention_user()
+
+            with patch("commands.birthday_command.Config") as mock_config:
+                mock_config.BIRTHDAY_CHANNEL_ID = None
+                mock_config.ANNOUNCEMENT_CHANNEL_ID = 999
+                await cog._announce_birthdays(TODAY)
+
+            self.bot.get_channel.assert_called_once_with(999)
+            self.channel.send.assert_called_once()
+
+        asyncio.run(async_test())
+
+
+class TestBirthdayCatchUp(unittest.TestCase):
+    """The loop only fires at 08:00, so startup after 08:00 must catch up."""
+
+    def setUp(self):
+        self.bot = MagicMock()
+        self.bot.wait_until_ready = AsyncMock()
+        self.db_manager = MagicMock()
+
+    def _make_cog(self):
+        cog = BirthdayCommand(self.bot, self.db_manager)
+        cog.daily_check.cancel()
+        return cog
+
+    def _run_before_loop(self, now):
+        async def async_test():
+            cog = self._make_cog()
+            cog._announce_birthdays = AsyncMock()
+            with patch.object(BirthdayCommand, "_now", staticmethod(lambda: now)):
+                await cog.before_daily_check()
+            return cog
+
+        return asyncio.run(async_test())
+
+    def test_startup_before_8am_does_not_announce(self):
+        cog = self._run_before_loop(
+            datetime.datetime(2025, 7, 15, 7, 59, 0, tzinfo=GERMANY_TZ)
+        )
+        cog._announce_birthdays.assert_not_called()
+
+    def test_startup_after_8am_catches_up(self):
+        cog = self._run_before_loop(
+            datetime.datetime(2025, 7, 15, 11, 30, 0, tzinfo=GERMANY_TZ)
+        )
+        cog._announce_birthdays.assert_awaited_once_with(datetime.date(2025, 7, 15))
+
+
+class TestBirthdayAgeText(unittest.TestCase):
     def test_age_computation_with_explicit_today(self):
         """Test _compute_age_text with an explicit ``today`` parameter.
 
@@ -324,10 +450,45 @@ class TestBirthdayDailyCheck(unittest.TestCase):
             self.assertIn("{mention}", msg)
 
 
-def discord_color_green():
-    import discord
+class TestBirthdayRemoveCommand(unittest.TestCase):
+    def _run(self, remove_return):
+        async def async_test():
+            bot = MagicMock()
+            bot.wait_until_ready = AsyncMock()
+            db_manager = MagicMock()
+            db_manager.remove_birthday = MagicMock(return_value=remove_return)
 
-    return discord.Color.green().value
+            cog = BirthdayCommand(bot, db_manager)
+            cog.daily_check.cancel()
+
+            interaction = MagicMock()
+            interaction.user.id = 123
+            interaction.user.display_name = "TestUser"
+            interaction.response.defer = AsyncMock()
+            interaction.followup.send = AsyncMock()
+
+            await cog.birthday_remove.callback(cog, interaction)
+
+            db_manager.remove_birthday.assert_called_once_with(123)
+            interaction.followup.send.assert_called_once()
+            _, kwargs = interaction.followup.send.call_args
+            return kwargs.get("embed")
+
+        return asyncio.run(async_test())
+
+    def test_removes_stored_birthday(self):
+        embed = self._run(True)
+        self.assertIn("gelöscht", embed.title)
+
+    def test_reports_when_nothing_was_stored(self):
+        embed = self._run(False)
+        self.assertIn("Kein Geburtstag", embed.title)
+
+    def test_reports_db_failure(self):
+        """A failed delete must not be reported as 'nothing stored'."""
+        embed = self._run(None)
+        self.assertIn("Fehler", embed.title)
+        self.assertEqual(embed.color.value, discord.Color.red().value)
 
 
 if __name__ == "__main__":

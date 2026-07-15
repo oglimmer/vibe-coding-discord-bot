@@ -273,6 +273,14 @@ class DatabaseManager:
                 )
             """)
 
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS birthday_announcements (
+                    announce_date DATE NOT NULL,
+                    announced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (announce_date)
+                )
+            """)
+
             # Migration: Add is_factcheckable column if it doesn't exist
             try:
                 cursor.execute(
@@ -2025,34 +2033,57 @@ class DatabaseManager:
             if connection:
                 connection.close()
 
-    def get_birthday(self, user_id):
-        """Return the stored birthday for a user, or None."""
+    def try_claim_birthday_announcement(self, announce_date):
+        """Claim the birthday announcement for *announce_date*.
+
+        Returns True for exactly one caller per date, across restarts and
+        replicas — the PRIMARY KEY makes the INSERT the arbiter.  A DB error
+        returns False so that an unverifiable claim never leads to a
+        duplicate announcement.
+        """
         connection = None
         try:
             connection = self._get_connection()
             cursor = connection.cursor()
             cursor.execute(
-                "SELECT user_id, username, birthday, server_id FROM birthdays WHERE user_id = ?",
-                (user_id,),
+                "INSERT IGNORE INTO birthday_announcements (announce_date) VALUES (?)",
+                (announce_date,),
             )
-            row = cursor.fetchone()
-            if row:
-                return {
-                    "user_id": row[0],
-                    "username": row[1],
-                    "birthday": row[2],
-                    "server_id": row[3],
-                }
-            return None
+            connection.commit()
+            return cursor.rowcount > 0
         except mariadb.Error as e:
-            logger.error(f"Error fetching birthday: {e}")
-            return None
+            logger.error(f"Error claiming birthday announcement: {e}")
+            return False
+        finally:
+            if connection:
+                connection.close()
+
+    def release_birthday_announcement(self, announce_date):
+        """Give up a claim so a later attempt on the same day can retry."""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                "DELETE FROM birthday_announcements WHERE announce_date = ?",
+                (announce_date,),
+            )
+            connection.commit()
+            return True
+        except mariadb.Error as e:
+            logger.error(f"Error releasing birthday announcement claim: {e}")
+            return False
         finally:
             if connection:
                 connection.close()
 
     def remove_birthday(self, user_id):
-        """Remove a user's stored birthday."""
+        """Remove a user's stored birthday.
+
+        Returns True if a row was deleted, False if the user had none stored,
+        and None if the delete failed — the caller needs to tell "nothing to
+        do" apart from "we could not do it".
+        """
         connection = None
         try:
             connection = self._get_connection()
@@ -2065,7 +2096,7 @@ class DatabaseManager:
             return deleted
         except mariadb.Error as e:
             logger.error(f"Error removing birthday: {e}")
-            return False
+            return None
         finally:
             if connection:
                 connection.close()
