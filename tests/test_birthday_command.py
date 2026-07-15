@@ -3,7 +3,7 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock
 
 import discord
 from discord.ext import commands
@@ -37,9 +37,7 @@ class TestBirthdayCommand(unittest.TestCase):
                 interaction.user.mention = "<@12345>"
                 interaction.response.send_message = AsyncMock()
 
-                await cog.birthday_set.callback(
-                    cog, interaction, birthday="14-02-1995"
-                )
+                await cog.birthday_set.callback(cog, interaction, birthday="14-02-1995")
 
                 # Verify response
                 interaction.response.send_message.assert_awaited_once()
@@ -74,9 +72,7 @@ class TestBirthdayCommand(unittest.TestCase):
                 interaction.user.id = 12345
                 interaction.response.send_message = AsyncMock()
 
-                await cog.birthday_set.callback(
-                    cog, interaction, birthday="99-99-9999"
-                )
+                await cog.birthday_set.callback(cog, interaction, birthday="99-99-9999")
 
                 interaction.response.send_message.assert_awaited_once()
                 text = interaction.response.send_message.call_args[0][0]

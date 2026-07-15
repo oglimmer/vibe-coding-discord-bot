@@ -1,7 +1,6 @@
 import json
 import logging
 import random
-import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -110,14 +109,10 @@ class BirthdayCommand(commands.Cog):
             try:
                 user = await self.bot.fetch_user(int(user_id_str))
             except Exception as e:
-                logger.warning(
-                    f"Could not fetch user {user_id_str} for birthday: {e}"
-                )
+                logger.warning(f"Could not fetch user {user_id_str} for birthday: {e}")
                 continue
 
-            greeting = random.choice(BIRTHDAY_GREETINGS).format(
-                mention=user.mention
-            )
+            greeting = random.choice(BIRTHDAY_GREETINGS).format(mention=user.mention)
 
             try:
                 await user.send(greeting)
@@ -125,9 +120,7 @@ class BirthdayCommand(commands.Cog):
                     f"Birthday greeting sent to {user.name}#{user.discriminator}"
                 )
             except discord.Forbidden:
-                logger.warning(
-                    f"Could not DM {user_id_str} (maybe DMs disabled)"
-                )
+                logger.warning(f"Could not DM {user_id_str} (maybe DMs disabled)")
 
     @birthday_check_loop.before_loop
     async def before_loop(self):
