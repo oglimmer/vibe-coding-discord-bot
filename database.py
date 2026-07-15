@@ -2,11 +2,15 @@ import mariadb
 import logging
 from config import Config
 import dataclasses
+import datetime as dt
 import json
 from datetime import datetime
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
+
+GERMANY_TZ = ZoneInfo("Europe/Berlin")
 
 
 @dataclasses.dataclass
@@ -259,13 +263,13 @@ class DatabaseManager:
                     username VARCHAR(255) NOT NULL,
                     birthday DATE NOT NULL,
                     server_id BIGINT,
+                    birthday_month INT AS (MONTH(birthday)) VIRTUAL,
+                    birthday_day INT AS (DAYOFMONTH(birthday)) VIRTUAL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         ON UPDATE CURRENT_TIMESTAMP,
                     PRIMARY KEY (user_id),
-                    INDEX idx_birthday_month_day (
-                        MONTH(birthday), DAYOFMONTH(birthday)
-                    )
+                    INDEX idx_birthday_month_day (birthday_month, birthday_day)
                 )
             """)
 
@@ -1981,8 +1985,17 @@ class DatabaseManager:
             if connection:
                 connection.close()
 
-    def get_birthdays_for_today(self):
-        """Return all users whose birthday matches today (month + day)."""
+    def get_birthdays_for_today(self, today=None):
+        """Return all users whose birthday matches today (month + day).
+
+        Parameters
+        ----------
+        today : datetime.date or None
+            Override for "today" (optional — defaults to the current date in
+            Germany).  Useful in tests to avoid patching the clock.
+        """
+        if today is None:
+            today = dt.datetime.now(GERMANY_TZ).date()
         connection = None
         try:
             connection = self._get_connection()
@@ -1991,9 +2004,9 @@ class DatabaseManager:
                 """
                 SELECT user_id, username, birthday, server_id
                 FROM birthdays
-                WHERE MONTH(birthday) = MONTH(CURDATE())
-                  AND DAYOFMONTH(birthday) = DAYOFMONTH(CURDATE())
-                """
+                WHERE birthday_month = ? AND birthday_day = ?
+                """,
+                (today.month, today.day),
             )
             results = cursor.fetchall()
             return [

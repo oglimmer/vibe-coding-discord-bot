@@ -69,7 +69,9 @@ class BirthdayCommand(commands.Cog):
                 )
                 return
 
-            birthdays = await asyncio.to_thread(self.db_manager.get_birthdays_for_today)
+            birthdays = await asyncio.to_thread(
+                self.db_manager.get_birthdays_for_today, today
+            )
 
             if not birthdays:
                 logger.info("No birthdays today")
