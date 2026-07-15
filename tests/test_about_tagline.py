@@ -5,8 +5,8 @@ from commands.about_command import AboutCommand
 
 
 class TestAboutTagline(unittest.TestCase):
-    def test_purpose_includes_tagline(self):
-        """The about embed must mention 'Most sophisticated in Discord VibeCoding'."""
+    def test_purpose_describes_vibe_coding_and_backend(self):
+        """The about embed must describe vibe coding and mention Claude Code + DeepSeek."""
         # Minimal mock bot to support _create_about_embed
         bot = MagicMock()
         bot.latency = 0.123
@@ -28,9 +28,18 @@ class TestAboutTagline(unittest.TestCase):
                 break
 
         self.assertIsNotNone(purpose_value, "Embed must contain a Purpose field")
-        tagline = "Most sophisticated in Discord VibeCoding"
         self.assertIn(
-            tagline,
+            "Vibe Coding",
             purpose_value,
-            f"Purpose field should contain '{tagline}'",
+            "Purpose field should mention 'Vibe Coding'",
+        )
+        self.assertIn(
+            "Claude Code",
+            purpose_value,
+            "Purpose field should mention 'Claude Code' framework",
+        )
+        self.assertIn(
+            "DeepSeek",
+            purpose_value,
+            "Purpose field should mention 'DeepSeek' as the backend model",
         )
