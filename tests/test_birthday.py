@@ -8,6 +8,7 @@ import discord
 from commands.birthday_command import BirthdayCommand, GERMANY_TZ
 
 TODAY = datetime.date(2025, 7, 15)
+GUILD_ID = 42
 
 
 class TestBirthdaySetCommand(unittest.TestCase):
@@ -50,32 +51,10 @@ class TestBirthdaySetCommand(unittest.TestCase):
 
         asyncio.run(async_test())
 
-    def test_birthday_set_valid_date_no_guild(self):
-        async def async_test():
-            bot = MagicMock()
-            bot.wait_until_ready = AsyncMock()
-            db_manager = MagicMock()
-            db_manager.set_birthday = MagicMock(return_value=True)
-            bot.db_manager = db_manager
-
-            cog = BirthdayCommand(bot, db_manager)
-            cog.daily_check.cancel()
-
-            interaction = MagicMock()
-            interaction.user.id = 111
-            interaction.user.display_name = "DmUser"
-            interaction.guild = None
-            interaction.response.defer = AsyncMock()
-            interaction.followup.send = AsyncMock()
-
-            await cog.birthday_set.callback(cog, interaction, datum="01-01-2000")
-
-            args, _ = db_manager.set_birthday.call_args
-            expected_date = datetime.date(2000, 1, 1)
-            self.assertEqual(args[2], expected_date)
-            self.assertIsNone(args[3])
-
-        asyncio.run(async_test())
+    def test_birthday_commands_are_guild_only(self):
+        """Birthdays are stored per server, so a DM has no server to store under."""
+        self.assertTrue(BirthdayCommand.birthday_set.guild_only)
+        self.assertTrue(BirthdayCommand.birthday_remove.guild_only)
 
     def test_birthday_set_invalid_format(self):
         async def async_test():
@@ -169,6 +148,7 @@ class TestBirthdayAnnouncements(unittest.TestCase):
         self.bot.db_manager = self.db_manager
         self.channel = MagicMock()
         self.channel.send = AsyncMock()
+        self.channel.guild.id = GUILD_ID
         self.bot.get_channel.return_value = self.channel
 
     def _make_cog(self):
@@ -187,7 +167,7 @@ class TestBirthdayAnnouncements(unittest.TestCase):
             "user_id": user_id,
             "username": username,
             "birthday": datetime.date(1990, 7, 15),
-            "server_id": 1,
+            "server_id": GUILD_ID,
         }
 
     def _mention_user(self, mention="<@555>"):
@@ -209,9 +189,11 @@ class TestBirthdayAnnouncements(unittest.TestCase):
                 mock_config.ANNOUNCEMENT_CHANNEL_ID = None
                 await cog._announce_birthdays(TODAY)
 
-            self.db_manager.get_birthdays_for_today.assert_called_once_with(TODAY)
+            self.db_manager.get_birthdays_for_today.assert_called_once_with(
+                GUILD_ID, TODAY
+            )
             self.db_manager.try_claim_birthday_announcement.assert_called_once_with(
-                TODAY
+                GUILD_ID, TODAY
             )
             self.channel.send.assert_called_once()
             _, kwargs = self.channel.send.call_args
@@ -274,6 +256,41 @@ class TestBirthdayAnnouncements(unittest.TestCase):
 
         asyncio.run(async_test())
 
+    def test_channel_without_a_guild_leaves_day_unclaimed(self):
+        """A DM channel has no server to scope the birthdays to."""
+
+        async def async_test():
+            cog = self._make_cog()
+            self.channel.guild = None
+
+            with patch("commands.birthday_command.Config") as mock_config:
+                mock_config.BIRTHDAY_CHANNEL_ID = 12345
+                mock_config.ANNOUNCEMENT_CHANNEL_ID = None
+                await cog._announce_birthdays(TODAY)
+
+            self.db_manager.get_birthdays_for_today.assert_not_called()
+            self.db_manager.try_claim_birthday_announcement.assert_not_called()
+            self.channel.send.assert_not_called()
+
+        asyncio.run(async_test())
+
+    def test_only_the_channels_own_server_is_greeted(self):
+        """The query is scoped to the guild that owns the birthday channel."""
+
+        async def async_test():
+            cog = self._make_cog()
+            self.channel.guild.id = 777
+            self.db_manager.get_birthdays_for_today.return_value = []
+
+            with patch("commands.birthday_command.Config") as mock_config:
+                mock_config.BIRTHDAY_CHANNEL_ID = 12345
+                mock_config.ANNOUNCEMENT_CHANNEL_ID = None
+                await cog._announce_birthdays(TODAY)
+
+            self.db_manager.get_birthdays_for_today.assert_called_once_with(777, TODAY)
+
+        asyncio.run(async_test())
+
     def test_no_birthdays_today(self):
         async def async_test():
             cog = self._make_cog()
@@ -284,7 +301,9 @@ class TestBirthdayAnnouncements(unittest.TestCase):
                 mock_config.ANNOUNCEMENT_CHANNEL_ID = None
                 await cog._announce_birthdays(TODAY)
 
-            self.db_manager.get_birthdays_for_today.assert_called_once_with(TODAY)
+            self.db_manager.get_birthdays_for_today.assert_called_once_with(
+                GUILD_ID, TODAY
+            )
             self.db_manager.try_claim_birthday_announcement.assert_not_called()
             self.channel.send.assert_not_called()
 
@@ -304,7 +323,9 @@ class TestBirthdayAnnouncements(unittest.TestCase):
                 mock_config.ANNOUNCEMENT_CHANNEL_ID = None
                 await cog._announce_birthdays(TODAY)
 
-            self.db_manager.release_birthday_announcement.assert_called_once_with(TODAY)
+            self.db_manager.release_birthday_announcement.assert_called_once_with(
+                GUILD_ID, TODAY
+            )
 
         asyncio.run(async_test())
 
@@ -346,7 +367,9 @@ class TestBirthdayAnnouncements(unittest.TestCase):
                 await cog._announce_birthdays(TODAY)
 
             self.channel.send.assert_not_called()
-            self.db_manager.release_birthday_announcement.assert_called_once_with(TODAY)
+            self.db_manager.release_birthday_announcement.assert_called_once_with(
+                GUILD_ID, TODAY
+            )
 
         asyncio.run(async_test())
 
@@ -464,12 +487,13 @@ class TestBirthdayRemoveCommand(unittest.TestCase):
             interaction = MagicMock()
             interaction.user.id = 123
             interaction.user.display_name = "TestUser"
+            interaction.guild.id = 987
             interaction.response.defer = AsyncMock()
             interaction.followup.send = AsyncMock()
 
             await cog.birthday_remove.callback(cog, interaction)
 
-            db_manager.remove_birthday.assert_called_once_with(123)
+            db_manager.remove_birthday.assert_called_once_with(123, 987)
             interaction.followup.send.assert_called_once()
             _, kwargs = interaction.followup.send.call_args
             return kwargs.get("embed")

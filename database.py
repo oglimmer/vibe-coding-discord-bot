@@ -262,22 +262,25 @@ class DatabaseManager:
                     user_id BIGINT NOT NULL,
                     username VARCHAR(255) NOT NULL,
                     birthday DATE NOT NULL,
-                    server_id BIGINT,
+                    server_id BIGINT NOT NULL,
                     birthday_month INT AS (MONTH(birthday)) VIRTUAL,
                     birthday_day INT AS (DAYOFMONTH(birthday)) VIRTUAL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         ON UPDATE CURRENT_TIMESTAMP,
-                    PRIMARY KEY (user_id),
-                    INDEX idx_birthday_month_day (birthday_month, birthday_day)
+                    PRIMARY KEY (user_id, server_id),
+                    INDEX idx_birthday_server_month_day (
+                        server_id, birthday_month, birthday_day
+                    )
                 )
             """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS birthday_announcements (
+                    server_id BIGINT NOT NULL,
                     announce_date DATE NOT NULL,
                     announced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (announce_date)
+                    PRIMARY KEY (server_id, announce_date)
                 )
             """)
 
@@ -1966,8 +1969,8 @@ class DatabaseManager:
             if connection:
                 connection.close()
 
-    def set_birthday(self, user_id, username, birthday, server_id=None):
-        """Insert or update a user's birthday."""
+    def set_birthday(self, user_id, username, birthday, server_id):
+        """Insert or update a user's birthday on one server."""
         connection = None
         try:
             connection = self._get_connection()
@@ -1978,8 +1981,7 @@ class DatabaseManager:
                 VALUES (?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     username = VALUES(username),
-                    birthday = VALUES(birthday),
-                    server_id = VALUES(server_id)
+                    birthday = VALUES(birthday)
                 """,
                 (user_id, username, birthday, server_id),
             )
@@ -1993,11 +1995,15 @@ class DatabaseManager:
             if connection:
                 connection.close()
 
-    def get_birthdays_for_today(self, today=None):
-        """Return all users whose birthday matches today (month + day).
+    def get_birthdays_for_today(self, server_id, today=None):
+        """Return the users on *server_id* whose birthday matches today.
 
         Parameters
         ----------
+        server_id : int
+            Only birthdays set on this server are returned, so a user in two
+            servers is greeted in each rather than wherever they last typed
+            the command.
         today : datetime.date or None
             Override for "today" (optional — defaults to the current date in
             Germany).  Useful in tests to avoid patching the clock.
@@ -2012,9 +2018,9 @@ class DatabaseManager:
                 """
                 SELECT user_id, username, birthday, server_id
                 FROM birthdays
-                WHERE birthday_month = ? AND birthday_day = ?
+                WHERE server_id = ? AND birthday_month = ? AND birthday_day = ?
                 """,
-                (today.month, today.day),
+                (server_id, today.month, today.day),
             )
             results = cursor.fetchall()
             return [
@@ -2033,21 +2039,24 @@ class DatabaseManager:
             if connection:
                 connection.close()
 
-    def try_claim_birthday_announcement(self, announce_date):
-        """Claim the birthday announcement for *announce_date*.
+    def try_claim_birthday_announcement(self, server_id, announce_date):
+        """Claim the birthday announcement for *server_id* on *announce_date*.
 
-        Returns True for exactly one caller per date, across restarts and
-        replicas — the PRIMARY KEY makes the INSERT the arbiter.  A DB error
-        returns False so that an unverifiable claim never leads to a
-        duplicate announcement.
+        Returns True for exactly one caller per server and date, across
+        restarts and replicas — the PRIMARY KEY makes the INSERT the arbiter.
+        A DB error returns False so that an unverifiable claim never leads to
+        a duplicate announcement.
         """
         connection = None
         try:
             connection = self._get_connection()
             cursor = connection.cursor()
             cursor.execute(
-                "INSERT IGNORE INTO birthday_announcements (announce_date) VALUES (?)",
-                (announce_date,),
+                """
+                INSERT IGNORE INTO birthday_announcements (server_id, announce_date)
+                VALUES (?, ?)
+                """,
+                (server_id, announce_date),
             )
             connection.commit()
             return cursor.rowcount > 0
@@ -2058,15 +2067,18 @@ class DatabaseManager:
             if connection:
                 connection.close()
 
-    def release_birthday_announcement(self, announce_date):
+    def release_birthday_announcement(self, server_id, announce_date):
         """Give up a claim so a later attempt on the same day can retry."""
         connection = None
         try:
             connection = self._get_connection()
             cursor = connection.cursor()
             cursor.execute(
-                "DELETE FROM birthday_announcements WHERE announce_date = ?",
-                (announce_date,),
+                """
+                DELETE FROM birthday_announcements
+                WHERE server_id = ? AND announce_date = ?
+                """,
+                (server_id, announce_date),
             )
             connection.commit()
             return True
@@ -2077,8 +2089,8 @@ class DatabaseManager:
             if connection:
                 connection.close()
 
-    def remove_birthday(self, user_id):
-        """Remove a user's stored birthday.
+    def remove_birthday(self, user_id, server_id):
+        """Remove a user's stored birthday on one server.
 
         Returns True if a row was deleted, False if the user had none stored,
         and None if the delete failed — the caller needs to tell "nothing to
@@ -2088,11 +2100,16 @@ class DatabaseManager:
         try:
             connection = self._get_connection()
             cursor = connection.cursor()
-            cursor.execute("DELETE FROM birthdays WHERE user_id = ?", (user_id,))
+            cursor.execute(
+                "DELETE FROM birthdays WHERE user_id = ? AND server_id = ?",
+                (user_id, server_id),
+            )
             connection.commit()
             deleted = cursor.rowcount > 0
             if deleted:
-                logger.info(f"Removed birthday for user {user_id}")
+                logger.info(
+                    f"Removed birthday for user {user_id} on server {server_id}"
+                )
             return deleted
         except mariadb.Error as e:
             logger.error(f"Error removing birthday: {e}")

@@ -78,8 +78,18 @@ class BirthdayCommand(commands.Cog):
                 )
                 return
 
+            # Greetings are scoped to the server that owns the channel, so a
+            # user who set a birthday on another server is not announced here.
+            guild = getattr(channel, "guild", None)
+            if guild is None:
+                logger.error(
+                    f"Birthday channel {channel_id} does not belong to a server — "
+                    "skipping birthday announcements"
+                )
+                return
+
             birthdays = await asyncio.to_thread(
-                self.db_manager.get_birthdays_for_today, today
+                self.db_manager.get_birthdays_for_today, guild.id, today
             )
 
             if not birthdays:
@@ -89,7 +99,7 @@ class BirthdayCommand(commands.Cog):
             # Claim only once there is something to send, so that a missing
             # channel or an unreadable table leaves the day open for a retry.
             claimed = await asyncio.to_thread(
-                self.db_manager.try_claim_birthday_announcement, today
+                self.db_manager.try_claim_birthday_announcement, guild.id, today
             )
             if not claimed:
                 logger.info(f"Birthdays for {today} were already announced — skipping")
@@ -143,7 +153,7 @@ class BirthdayCommand(commands.Cog):
                     "releasing the claim for a later retry"
                 )
                 await asyncio.to_thread(
-                    self.db_manager.release_birthday_announcement, today
+                    self.db_manager.release_birthday_announcement, guild.id, today
                 )
         except Exception as e:
             logger.error(f"Error in birthday daily check: {e}", exc_info=True)
@@ -180,6 +190,7 @@ class BirthdayCommand(commands.Cog):
     @app_commands.describe(
         datum="Dein Geburtsdatum im Format dd-mm-yyyy (z.B. 15-07-1990)"
     )
+    @app_commands.guild_only()
     async def birthday_set(self, interaction: discord.Interaction, datum: str):
         """Set or update the user's birthday."""
         await interaction.response.defer(ephemeral=True)
@@ -227,15 +238,15 @@ class BirthdayCommand(commands.Cog):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
-            server_id = interaction.guild.id if interaction.guild else None
             username = interaction.user.display_name
 
+            # guild_only, so interaction.guild is always set.
             success = await asyncio.to_thread(
                 self.db_manager.set_birthday,
                 interaction.user.id,
                 username,
                 parsed,
-                server_id,
+                interaction.guild.id,
             )
 
             if success:
@@ -282,12 +293,15 @@ class BirthdayCommand(commands.Cog):
         name="birthday-remove",
         description="Lösche deinen gespeicherten Geburtstag",
     )
+    @app_commands.guild_only()
     async def birthday_remove(self, interaction: discord.Interaction):
-        """Remove the user's stored birthday."""
+        """Remove the user's stored birthday on this server."""
         await interaction.response.defer(ephemeral=True)
         try:
             removed = await asyncio.to_thread(
-                self.db_manager.remove_birthday, interaction.user.id
+                self.db_manager.remove_birthday,
+                interaction.user.id,
+                interaction.guild.id,
             )
 
             if removed is None:
@@ -316,8 +330,8 @@ class BirthdayCommand(commands.Cog):
                 embed = discord.Embed(
                     title="Kein Geburtstag gespeichert",
                     description=(
-                        "Für dich ist kein Geburtstag hinterlegt — "
-                        "es gibt also nichts zu löschen."
+                        "Für dich ist auf diesem Server kein Geburtstag "
+                        "hinterlegt — es gibt also nichts zu löschen."
                     ),
                     color=discord.Color.blue(),
                 )
