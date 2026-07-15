@@ -120,13 +120,23 @@ class BirthdayCommand(commands.Cog):
         await self.bot.wait_until_ready()
 
     @staticmethod
-    def _compute_age_text(birthday_date):
-        """Return a text like 'Du wirst heute 30 Jahre alt!' or an age-neutral variant."""
+    def _compute_age_text(birthday_date, today=None):
+        """Return a text like 'Du wirst heute 30 Jahre alt!' or an age-neutral variant.
+
+        Parameters
+        ----------
+        birthday_date : datetime.date or None
+            The stored birthday.
+        today : datetime.date or None
+            Override for "today" (optional — defaults to the current date in
+            Germany).  Useful in tests to avoid patching the clock.
+        """
         if birthday_date is None:
             return ""
         if hasattr(birthday_date, "date") and callable(birthday_date.date):
             birthday_date = birthday_date.date()
-        today = dt.datetime.now(GERMANY_TZ).date()
+        if today is None:
+            today = dt.datetime.now(GERMANY_TZ).date()
         age = today.year - birthday_date.year
         if (today.month, today.day) < (birthday_date.month, birthday_date.day):
             age -= 1
