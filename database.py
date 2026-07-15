@@ -253,6 +253,22 @@ class DatabaseManager:
                 )
             """)
 
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS birthdays (
+                    user_id BIGINT NOT NULL,
+                    username VARCHAR(255) NOT NULL,
+                    birthday DATE NOT NULL,
+                    server_id BIGINT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id),
+                    INDEX idx_birthday_month_day (
+                        MONTH(birthday), DAYOFMONTH(birthday)
+                    )
+                )
+            """)
+
             # Migration: Add is_factcheckable column if it doesn't exist
             try:
                 cursor.execute(
@@ -1934,6 +1950,109 @@ class DatabaseManager:
             )
             deliveries = {row[0]: row[1] for row in cursor.fetchall()}
             return {"posts": posts, "deliveries": deliveries}
+        finally:
+            if connection:
+                connection.close()
+
+    def set_birthday(self, user_id, username, birthday, server_id=None):
+        """Insert or update a user's birthday."""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                INSERT INTO birthdays (user_id, username, birthday, server_id)
+                VALUES (?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    username = VALUES(username),
+                    birthday = VALUES(birthday),
+                    server_id = VALUES(server_id)
+                """,
+                (user_id, username, birthday, server_id),
+            )
+            connection.commit()
+            logger.info(f"Set birthday for user {username} ({user_id}): {birthday}")
+            return True
+        except mariadb.Error as e:
+            logger.error(f"Error setting birthday: {e}")
+            return False
+        finally:
+            if connection:
+                connection.close()
+
+    def get_birthdays_for_today(self):
+        """Return all users whose birthday matches today (month + day)."""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                SELECT user_id, username, birthday, server_id
+                FROM birthdays
+                WHERE MONTH(birthday) = MONTH(CURDATE())
+                  AND DAYOFMONTH(birthday) = DAYOFMONTH(CURDATE())
+                """
+            )
+            results = cursor.fetchall()
+            return [
+                {
+                    "user_id": row[0],
+                    "username": row[1],
+                    "birthday": row[2],
+                    "server_id": row[3],
+                }
+                for row in results
+            ]
+        except mariadb.Error as e:
+            logger.error(f"Error fetching today's birthdays: {e}")
+            return []
+        finally:
+            if connection:
+                connection.close()
+
+    def get_birthday(self, user_id):
+        """Return the stored birthday for a user, or None."""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT user_id, username, birthday, server_id FROM birthdays WHERE user_id = ?",
+                (user_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "user_id": row[0],
+                    "username": row[1],
+                    "birthday": row[2],
+                    "server_id": row[3],
+                }
+            return None
+        except mariadb.Error as e:
+            logger.error(f"Error fetching birthday: {e}")
+            return None
+        finally:
+            if connection:
+                connection.close()
+
+    def remove_birthday(self, user_id):
+        """Remove a user's stored birthday."""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute("DELETE FROM birthdays WHERE user_id = ?", (user_id,))
+            connection.commit()
+            deleted = cursor.rowcount > 0
+            if deleted:
+                logger.info(f"Removed birthday for user {user_id}")
+            return deleted
+        except mariadb.Error as e:
+            logger.error(f"Error removing birthday: {e}")
+            return False
         finally:
             if connection:
                 connection.close()
