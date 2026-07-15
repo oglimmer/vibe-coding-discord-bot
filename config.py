@@ -107,6 +107,13 @@ class Config:
     )
     POSTILLON_LEASE_SECONDS = int(os.getenv("POSTILLON_LEASE_SECONDS", "1800"))
 
+    # Birthday greeting configuration
+    BIRTHDAY_CHANNEL_ID = (
+        int(os.getenv("BIRTHDAY_CHANNEL_ID"))
+        if os.getenv("BIRTHDAY_CHANNEL_ID")
+        else None
+    )
+
 
 def setup_logging():
     logging.basicConfig(
