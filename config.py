@@ -66,11 +66,17 @@ class Config:
         "VIBECODE_WORKER_IMAGE",
         "ghcr.io/oglimmer/vibe-coding-discord-bot-worker:latest",
     )
-    VIBECODE_MODEL = os.getenv("VIBECODE_MODEL", "deepseek/deepseek-v4-pro")
+    # Claude Code model id (not aider's provider/model form): a deepseek-* id runs
+    # on DeepSeek's Anthropic-compatible endpoint, a claude-* id on the real
+    # Anthropic API (which would additionally need ANTHROPIC_API_KEY in the secret).
+    VIBECODE_MODEL = os.getenv("VIBECODE_MODEL", "deepseek-v4-pro")
     VIBECODE_NAMESPACE = os.getenv("VIBECODE_NAMESPACE")
     VIBECODE_SECRET_NAME = os.getenv("VIBECODE_SECRET_NAME", "discord-bot-secrets")
     VIBECODE_IMAGE_PULL_SECRET = os.getenv("VIBECODE_IMAGE_PULL_SECRET")
-    VIBECODE_JOB_TIMEOUT_SECONDS = int(os.getenv("VIBECODE_JOB_TIMEOUT_SECONDS", 2700))
+    # The worker implements, self-reviews, verifies, then waits for the AI review
+    # action and fixes its findings — several agent rounds plus GitHub round-trips,
+    # so this is a much wider budget than the old one-shot aider run needed.
+    VIBECODE_JOB_TIMEOUT_SECONDS = int(os.getenv("VIBECODE_JOB_TIMEOUT_SECONDS", 7200))
     VIBECODE_COOLDOWN_SECONDS = int(os.getenv("VIBECODE_COOLDOWN_SECONDS", 900))
     VIBECODE_MAX_CONCURRENT_JOBS = int(os.getenv("VIBECODE_MAX_CONCURRENT_JOBS", 1))
 

@@ -41,6 +41,22 @@ jobs:
       - name: Ruff format check
         run: ruff format --check .
 
+  worker:
+    name: Lint worker script (shellcheck)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      # The vibecode worker is a sizeable bash pipeline that only ever runs
+      # inside an ephemeral Job, where a quoting bug shows up as a mystery
+      # failure 20 minutes in. Lint it here instead.
+      - name: Shellcheck
+        run: shellcheck worker/run_agent.sh
+
   test:
     name: Test
     runs-on: ubuntu-latest

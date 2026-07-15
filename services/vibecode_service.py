@@ -1,9 +1,11 @@
 """
 Vibecode service: lets the bot extend itself.
 
-Spawns a Kubernetes Job that clones this repository, runs an agentic coding
-AI (aider + DeepSeek) against a user-supplied feature request, verifies the
-result with the test suite and ruff, then pushes a branch and opens a PR.
+Spawns a Kubernetes Job that clones this repository, runs an agentic coding AI
+(Claude Code + DeepSeek) against a user-supplied feature request, self-reviews
+the diff, verifies it with the test suite and ruff, opens a PR, then drives the
+AI review action's review->fix loop until the PR is approved. The final merge is
+left to a human (see worker/run_agent.sh).
 """
 
 import asyncio
@@ -79,6 +81,7 @@ class VibeCodeResult:
     pr_url: str | None = None
     branch: str | None = None
     reason: str | None = None
+    merged: bool = False
     log_tail: str = field(default="", repr=False)
 
     @property
@@ -211,7 +214,7 @@ class VibeCodeService:
                         {"name": "VIBECODE_PROMPT", "value": prompt},
                         {"name": "VIBECODE_FEATURE", "value": feature},
                         {"name": "VIBECODE_PR_TITLE", "value": pr_title},
-                        {"name": "AIDER_MODEL", "value": Config.VIBECODE_MODEL},
+                        {"name": "CLAUDE_MODEL", "value": Config.VIBECODE_MODEL},
                         {
                             "name": "DEEPSEEK_API_KEY",
                             "valueFrom": {
@@ -357,11 +360,16 @@ class VibeCodeService:
                 status="success",
                 pr_url=parsed.get("pr_url"),
                 branch=parsed.get("branch"),
+                merged=bool(parsed.get("merged")),
                 log_tail=log_tail,
             )
+        # A failed run can still have produced a PR (e.g. the review never
+        # approved it) or at least a pushed branch — pass both on so the user
+        # gets a link to whatever survived.
         return VibeCodeResult(
             status="failed",
             reason=parsed.get("reason", "Der Coding-Agent ist gescheitert."),
+            pr_url=parsed.get("pr_url"),
             branch=parsed.get("branch"),
             log_tail=log_tail,
         )

@@ -9,7 +9,7 @@ A professional Discord bot written in Python 3.12 that responds to greetings wit
 - **Daily Statistics**: `/greetings` slash command shows daily greeting statistics
 - **AI-Powered Internet Troll**: Automatically analyzes longer messages (>100 chars) with configurable probability and acts as a humorous contrarian troll via ChatGPT API (requires user opt-in)
 - **Reaction-Based Fact Checking**: Users can react with 🔍 emoji to any message to request a detailed fact-check with numerical scoring (0-9 scale)
-- **Vibecode (self-extending bot)**: `/vibecode` spawns a Kubernetes Job in which an agentic coding AI (aider + DeepSeek) implements the requested feature in this repository, verifies it with the test suite and ruff, and opens a pull request
+- **Vibecode (self-extending bot)**: `/vibecode` spawns a Kubernetes Job in which an agentic coding AI (Claude Code + DeepSeek) implements the requested feature in this repository, verifies it with the test suite and ruff, opens a pull request, and works through the AI reviewer's findings until it is approved
 - **Postillon RSS archive**: Polls for new Postillon articles every 15 minutes, stores them in MariaDB, and publishes new entries as Discord embeds
 - **Professional Architecture**: Extensible command and message handler system
 - **Comprehensive Logging**: Detailed logging for monitoring and debugging
@@ -273,10 +273,12 @@ The bot is designed for easy extension:
 `/vibecode <feature description>` lets anyone on the server extend the bot:
 
 1. The bot creates a **Kubernetes Job** in its own namespace (RBAC for this ships with the Helm chart; the worker image is built by `.github/workflows/worker-build-push.yml` from `worker/`).
-2. The worker clones this repository, creates a `vibecode/...` branch, and runs **aider** with **DeepSeek** on the request. The bot wraps the raw request in an enhanced prompt that pins the repo conventions (cog structure, config, DB access, embeds) and quality gates.
-3. The worker then verifies independently of the agent: `ruff check` / `ruff format` (with one autofix round) and `python -m unittest discover tests` (with one AI repair round on failure).
-4. Only if everything passes does it push the branch and open a **pull request** via the GitHub API; the PR link is posted back to the Discord channel. Nothing merges without human review.
-5. The Job cleans itself up (`ttlSecondsAfterFinished`), is capped by `VIBECODE_JOB_TIMEOUT_SECONDS`, and abuse is limited via a per-user cooldown (`VIBECODE_COOLDOWN_SECONDS`) and a global concurrency cap (`VIBECODE_MAX_CONCURRENT_JOBS`).
+2. The worker clones this repository, creates a `vibecode/...` branch, and runs **Claude Code** against a **DeepSeek** backend on the request. The bot wraps the raw request in an enhanced prompt that pins the repo conventions (cog structure, config, DB access, embeds) and quality gates.
+3. A **self-review** gate then has a judge model read the resulting diff and answer one question: does this actually implement what was asked, with a test that exercises it? A "no" goes back to the agent as a corrective round. This catches the worst failure mode — plausible-looking work on the wrong thing — before a PR is ever opened.
+4. A **verification** gate runs the repo's real checks locally: the pre-commit hooks plus `ruff check` / `ruff format --check` and the test suite. Failures go back to the agent for up to two fix rounds. If it still can't go green, no PR is opened — the branch is pushed for a human to finish.
+5. Only then does it push and open a **pull request**. The [AI review action](.github/workflows/ai-review.yml) reviews it, and the worker feeds every finding (plus any failing CI check, with job logs) back to the agent and pushes fixes, until the reviewer approves or the round budget runs out.
+6. The result is posted back to the Discord channel. **Auto-merge is off**: `/vibecode` is open to everyone and `main` auto-deploys, so an approved PR waits for a human to press merge. (`VIBECODE_AUTO_MERGE=true` on the worker would change that.)
+7. The Job cleans itself up (`ttlSecondsAfterFinished`), is capped by `VIBECODE_JOB_TIMEOUT_SECONDS`, and abuse is limited via a per-user cooldown (`VIBECODE_COOLDOWN_SECONDS`) and a global concurrency cap (`VIBECODE_MAX_CONCURRENT_JOBS`).
 
 Local development: the service falls back to your local kubeconfig when it is not running in-cluster; the target namespace then needs the secret from `VIBECODE_SECRET_NAME` containing `DEEPSEEK_API_KEY` and `VIBECODE_GITHUB_TOKEN`.
 

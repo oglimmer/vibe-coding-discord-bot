@@ -136,6 +136,14 @@ class TestJobManifest(unittest.TestCase):
         self.assertIn("valueFrom", env["GITHUB_TOKEN"])
         self.assertNotIn("value", env["GITHUB_TOKEN"])
 
+    def test_passes_model_as_claude_model(self):
+        # The worker runs Claude Code, which reads CLAUDE_MODEL. Handing it the
+        # old aider variable would silently fall back to the worker's default.
+        container = self.manifest["spec"]["template"]["spec"]["containers"][0]
+        env = {e["name"]: e for e in container["env"]}
+        self.assertEqual(env["CLAUDE_MODEL"]["value"], Config.VIBECODE_MODEL)
+        self.assertNotIn("AIDER_MODEL", env)
+
     def test_pod_runs_as_non_root(self):
         sec = self.manifest["spec"]["template"]["spec"]["securityContext"]
         self.assertTrue(sec["runAsNonRoot"])
@@ -165,6 +173,27 @@ class TestBuildResult(unittest.TestCase):
         result = self.service._build_result("succeeded", logs)
         self.assertTrue(result.succeeded)
         self.assertEqual(result.pr_url, "https://x/1")
+
+    def test_approved_but_unmerged_is_success_and_not_merged(self):
+        # Auto-merge is off by default: the worker reports an approved, open PR
+        # as a success. The user must not be told it was merged.
+        logs = 'VIBECODE_RESULT:{"status":"success","pr_url":"https://x/1","branch":"b","merged":false}'
+        result = self.service._build_result("succeeded", logs)
+        self.assertTrue(result.succeeded)
+        self.assertFalse(result.merged)
+
+    def test_merged_flag_is_carried_through(self):
+        logs = 'VIBECODE_RESULT:{"status":"success","pr_url":"https://x/1","branch":"b","merged":true}'
+        self.assertTrue(self.service._build_result("succeeded", logs).merged)
+
+    def test_failure_keeps_pr_url_when_review_left_it_open(self):
+        # The review->fix loop can give up with the PR still open; the link is
+        # the whole point of the failure message, so it must survive.
+        logs = 'VIBECODE_RESULT:{"status":"failed","pr_url":"https://x/9","branch":"b","reason":"review not approved"}'
+        result = self.service._build_result("failed", logs)
+        self.assertFalse(result.succeeded)
+        self.assertEqual(result.pr_url, "https://x/9")
+        self.assertEqual(result.branch, "b")
 
     def test_job_succeeded_but_no_result_line_is_failure(self):
         result = self.service._build_result("succeeded", "no marker")

@@ -113,9 +113,13 @@ env:
   # injected separately, gated on .Values.vibecode.enabled
   VIBECODE_REPO: "oglimmer/vibe-coding-discord-bot"
   VIBECODE_WORKER_IMAGE: "ghcr.io/oglimmer/vibe-coding-discord-bot-worker:latest"
-  VIBECODE_MODEL: "deepseek/deepseek-v4-pro"
+  # Claude Code model id (bare, not aider's provider/model form): deepseek-*
+  # routes to DeepSeek's Anthropic-compatible endpoint.
+  VIBECODE_MODEL: "deepseek-v4-pro"
   VIBECODE_IMAGE_PULL_SECRET: "oglimmerregistrykey"
-  VIBECODE_JOB_TIMEOUT_SECONDS: "2700"
+  # The worker implements, self-reviews, verifies, opens a PR and then works
+  # through the AI reviewer's findings, so it needs a wide budget (2h).
+  VIBECODE_JOB_TIMEOUT_SECONDS: "7200"
   VIBECODE_COOLDOWN_SECONDS: "900"
   VIBECODE_MAX_CONCURRENT_JOBS: "1"
 

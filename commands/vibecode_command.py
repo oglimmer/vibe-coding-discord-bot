@@ -2,8 +2,9 @@
 Discord command handling for the vibecode functionality.
 
 /vibecode lets any user ask the bot to implement a new feature for itself:
-a Kubernetes Job runs an agentic coding AI (aider + DeepSeek), verifies the
-change with tests and lint, then opens a pull request.
+a Kubernetes Job runs an agentic coding AI (Claude Code + DeepSeek), verifies
+the change with tests and lint, opens a pull request, and works through the AI
+reviewer's findings until the PR is approved.
 """
 
 import asyncio
@@ -95,7 +96,8 @@ class VibeCodeCommand(commands.Cog):
         embed = discord.Embed(
             title="🛠️ Vibecode gestartet",
             description=(
-                "Der Coding-Agent baut jetzt dein Feature. Das kann eine "
+                "Der Coding-Agent baut jetzt dein Feature, testet es und "
+                "arbeitet die Anmerkungen des AI-Reviews ein. Das kann eine "
                 "Weile dauern - ich melde mich hier, sobald der PR fertig ist."
             ),
             color=0x1337FF,
@@ -108,11 +110,21 @@ class VibeCodeCommand(commands.Cog):
         return embed
 
     def _create_success_embed(self, feature, result):
+        if result.merged:
+            title = "✅ Vibecode fertig - PR gemerged!"
+            description = (
+                "Das Feature wurde implementiert, getestet, reviewed und gemerged.\n"
+            )
+        else:
+            title = "✅ Vibecode fertig - PR bereit!"
+            description = (
+                "Das Feature wurde implementiert, getestet und vom AI-Review "
+                "freigegeben. Gemerged wird von Hand.\n"
+            )
         embed = discord.Embed(
-            title="✅ Vibecode fertig - PR erstellt!",
+            title=title,
             description=(
-                f"Das Feature wurde implementiert und getestet.\n"
-                f"**Pull Request:** {result.pr_url or 'siehe Repository'}"
+                f"{description}**Pull Request:** {result.pr_url or 'siehe Repository'}"
             ),
             color=0x2ECC71,
             timestamp=datetime.now(),
@@ -131,6 +143,11 @@ class VibeCodeCommand(commands.Cog):
             timestamp=datetime.now(),
         )
         embed.add_field(name="Feature", value=feature[:1000], inline=False)
+        # A failed run can still leave a reviewable PR or a pushed branch behind.
+        if result.pr_url:
+            embed.add_field(name="Pull Request", value=result.pr_url, inline=False)
+        if result.branch:
+            embed.add_field(name="Branch", value=f"`{result.branch}`", inline=True)
         if result.log_tail:
             tail = result.log_tail[-MAX_LOG_TAIL_CHARS:]
             embed.add_field(
