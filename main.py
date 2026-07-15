@@ -21,6 +21,7 @@ from commands.about_command import setup as setup_about_command
 from commands.klugscheisser_command import setup as setup_klugscheisser_command
 from commands.vibecode_command import setup as setup_vibecode_command
 from commands.postillon_command import setup as setup_postillon_command
+from commands.birthday_command import setup as setup_birthday_command
 
 logger = setup_logging()
 
@@ -71,6 +72,8 @@ class DiscordBot(commands.Bot):
                         "POSTILLON_ENABLED is true but POSTILLON_CHANNEL_ID is "
                         "missing - Postillon integration disabled"
                     )
+
+            await setup_birthday_command(self)
 
             await self.tree.sync()
             logger.info("Command tree synced successfully")

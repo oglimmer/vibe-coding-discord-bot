@@ -101,6 +101,9 @@ class Config:
     )
     POSTILLON_LEASE_SECONDS = int(os.getenv("POSTILLON_LEASE_SECONDS", "1800"))
 
+    # Birthday file (JSON)
+    BIRTHDAY_FILE = os.getenv("BIRTHDAY_FILE", "birthdays.json")
+
 
 def setup_logging():
     logging.basicConfig(
