@@ -70,7 +70,9 @@ class TldrCommand(commands.Cog):
             after = discord.utils.utcnow() - timedelta(hours=24)
 
         try:
-            opted_in = self.db_manager.get_tldr_opted_in_users()
+            # Opt-in is per guild: consent given on another server must not
+            # leak messages into this one's summaries.
+            opted_in = self.db_manager.get_tldr_opted_in_users(interaction.guild_id)
 
             messages = []
             skipped_no_optin = 0
@@ -152,14 +154,24 @@ class TldrCommand(commands.Cog):
         """Include the invoking user's messages in future /tldr summaries.
 
         /tldr is opt-in only, so nothing of a user's is summarized until they
-        run this command.
+        run this command. Consent applies only to the server it was given on.
         """
-        ok = self.db_manager.set_tldr_optin(interaction.user.id, True)
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "❌ Dieser Befehl funktioniert nur auf einem Server, da das "
+                "Opt-in pro Server gilt.",
+                ephemeral=True,
+            )
+            return
+
+        ok = self.db_manager.set_tldr_optin(
+            interaction.guild_id, interaction.user.id, True
+        )
         if ok:
             await interaction.response.send_message(
-                "🔔 Deine Nachrichten können ab jetzt in /tldr-Zusammenfassungen "
-                "einfließen und werden dafür an die KI gesendet. "
-                "Mit `/tldr_optout` kannst du das wieder rückgängig machen.",
+                "🔔 Deine Nachrichten können ab jetzt auf diesem Server in "
+                "/tldr-Zusammenfassungen einfließen und werden dafür an die KI "
+                "gesendet. Mit `/tldr_optout` kannst du das wieder rückgängig machen.",
                 ephemeral=True,
             )
         else:
@@ -177,13 +189,24 @@ class TldrCommand(commands.Cog):
         """Exclude the invoking user's messages from /tldr summaries again.
 
         This is the default state; the command exists to undo a prior
-        /tldr_optin.
+        /tldr_optin on this server.
         """
-        ok = self.db_manager.set_tldr_optin(interaction.user.id, False)
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "❌ Dieser Befehl funktioniert nur auf einem Server, da das "
+                "Opt-in pro Server gilt.",
+                ephemeral=True,
+            )
+            return
+
+        ok = self.db_manager.set_tldr_optin(
+            interaction.guild_id, interaction.user.id, False
+        )
         if ok:
             await interaction.response.send_message(
-                "🔕 Deine Nachrichten werden aus /tldr-Zusammenfassungen "
-                "ausgeschlossen und nicht mehr an die KI gesendet.",
+                "🔕 Deine Nachrichten werden auf diesem Server aus "
+                "/tldr-Zusammenfassungen ausgeschlossen und nicht mehr an die "
+                "KI gesendet.",
                 ephemeral=True,
             )
         else:
