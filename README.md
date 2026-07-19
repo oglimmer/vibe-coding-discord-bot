@@ -200,12 +200,12 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 
 **Available Commands:**
 - `/tldr [anzahl] [zeit]`: Summarize recent channel messages (works in text channels and threads). `anzahl` (5–200, default 50) is how many recent messages are **scanned**; the summary itself only covers those from opted-in users, so it may contain fewer. `zeit` optionally restricts to the last hour or 24 hours.
-- `/tldr_optin`: Allow your own messages to be included in summaries (they are otherwise never sent to the AI)
-- `/tldr_optout`: Exclude your messages again (this is the default)
+- `/tldr_optin`: Allow your own messages to be included in summaries (they are otherwise never sent to the AI). The opt-in applies only to the server you run it on.
+- `/tldr_optout`: Exclude your messages again on this server (this is the default)
 
 On Kubernetes, enable the feature via the Helm chart's `tldr.enabled` value (default `true`); it injects `TLDR_ENABLED` and the shared `DEEPSEEK_API_KEY` (from the sealed secret) into the deployment. `TLDR_MODEL` and `DEEPSEEK_BASE_URL` are set in `helm/values.yaml`'s `env` block.
 
-**Privacy:** `/tldr` is opt-in only. Messages are sent to DeepSeek to generate the summary, but only messages from users who have run `/tldr_optin` ever leave Discord — bot messages and messages from everyone else are filtered out first.
+**Privacy:** `/tldr` is opt-in only. Messages are sent to DeepSeek to generate the summary, but only messages from users who have run `/tldr_optin` ever leave Discord — bot messages and messages from everyone else are filtered out first. Consent is stored per server, so opting in on one server never makes your messages summarizable on another.
 
 ## Usage
 

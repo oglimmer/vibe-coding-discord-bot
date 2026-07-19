@@ -235,25 +235,71 @@ class TestTldrCommand(unittest.IsolatedAsyncioTestCase):
     async def test_tldr_optin_persists_preference(self):
         interaction = MagicMock()
         interaction.user.id = 42
+        interaction.guild_id = 999
         interaction.response.send_message = AsyncMock()
         self.db.set_tldr_optin.return_value = True
 
         await self.cog.tldr_optin.callback(self.cog, interaction)
 
-        self.db.set_tldr_optin.assert_called_once_with(42, True)
+        self.db.set_tldr_optin.assert_called_once_with(999, 42, True)
         interaction.response.send_message.assert_called_once()
         self.assertTrue(interaction.response.send_message.call_args[1]["ephemeral"])
 
     async def test_tldr_optout_persists_preference(self):
         interaction = MagicMock()
         interaction.user.id = 42
+        interaction.guild_id = 999
         interaction.response.send_message = AsyncMock()
         self.db.set_tldr_optin.return_value = True
 
         await self.cog.tldr_optout.callback(self.cog, interaction)
 
-        self.db.set_tldr_optin.assert_called_once_with(42, False)
+        self.db.set_tldr_optin.assert_called_once_with(999, 42, False)
         interaction.response.send_message.assert_called_once()
+
+    async def test_tldr_optin_rejected_in_dm(self):
+        """Opt-in is per guild, so it must not be settable from a DM."""
+        interaction = MagicMock()
+        interaction.user.id = 42
+        interaction.guild_id = None
+        interaction.response.send_message = AsyncMock()
+
+        await self.cog.tldr_optin.callback(self.cog, interaction)
+
+        self.db.set_tldr_optin.assert_not_called()
+        self.assertTrue(interaction.response.send_message.call_args[1]["ephemeral"])
+
+    async def test_tldr_scopes_opt_in_lookup_to_this_guild(self):
+        """The opt-in lookup must be scoped to the guild the command ran in."""
+        interaction = MagicMock()
+        interaction.guild_id = 999
+        interaction.response.defer = AsyncMock()
+        interaction.followup.send = AsyncMock()
+        interaction.channel = MagicMock(spec=discord.TextChannel)
+
+        user = MagicMock()
+        user.bot = False
+        user.id = 7
+        user.display_name = "Serverbewohner"
+        msg = MagicMock()
+        msg.author = user
+        msg.content = "hallo welt"
+
+        async def mock_history(limit=100, after=None, oldest_first=False):
+            yield msg
+
+        interaction.channel.history = mock_history
+        self.db.get_tldr_opted_in_users.return_value = {7}
+
+        self.mock_ai_client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="- Zusammenfassung"))]
+            )
+        )
+
+        await self.cog.tldr.callback(self.cog, interaction, anzahl=10, zeit=None)
+
+        self.db.get_tldr_opted_in_users.assert_called_once_with(999)
 
     async def test_tldr_no_messages(self):
         interaction = MagicMock()

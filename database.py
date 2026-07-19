@@ -155,8 +155,10 @@ class DatabaseManager:
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS tldr_optins (
-                    user_id BIGINT PRIMARY KEY,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    guild_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, user_id)
                 )
             """)
 
@@ -1103,11 +1105,12 @@ class DatabaseManager:
             if connection:
                 connection.close()
 
-    def set_tldr_optin(self, user_id, opted_in):
+    def set_tldr_optin(self, guild_id, user_id, opted_in):
         """Opt a user in to (or back out of) having their messages summarized by /tldr.
 
         /tldr is opt-in only: a user's messages are excluded from summaries
-        unless they have an explicit opt-in row here.
+        unless they have an explicit opt-in row here. Consent is per guild, so
+        opting in on one server never exposes the user's messages on another.
         """
         connection = None
         try:
@@ -1116,21 +1119,23 @@ class DatabaseManager:
             if opted_in:
                 cursor.execute(
                     """
-                    INSERT INTO tldr_optins (user_id)
-                    VALUES (?)
+                    INSERT INTO tldr_optins (guild_id, user_id)
+                    VALUES (?, ?)
                     ON DUPLICATE KEY UPDATE user_id = user_id
                 """,
-                    (user_id,),
+                    (guild_id, user_id),
                 )
             else:
                 cursor.execute(
-                    "DELETE FROM tldr_optins WHERE user_id = ?",
-                    (user_id,),
+                    "DELETE FROM tldr_optins WHERE guild_id = ? AND user_id = ?",
+                    (guild_id, user_id),
                 )
 
             connection.commit()
             status = "opted in to" if opted_in else "opted back out of"
-            logger.info(f"User {user_id} {status} /tldr summarization")
+            logger.info(
+                f"User {user_id} {status} /tldr summarization in guild {guild_id}"
+            )
             return True
         except mariadb.Error as e:
             logger.error(f"Error setting tldr opt-in: {e}")
@@ -1139,13 +1144,16 @@ class DatabaseManager:
             if connection:
                 connection.close()
 
-    def get_tldr_opted_in_users(self):
-        """Return the set of user_ids that have opted in to /tldr summarization."""
+    def get_tldr_opted_in_users(self, guild_id):
+        """Return the set of user_ids opted in to /tldr summarization in this guild."""
         connection = None
         try:
             connection = self._get_connection()
             cursor = connection.cursor()
-            cursor.execute("SELECT user_id FROM tldr_optins")
+            cursor.execute(
+                "SELECT user_id FROM tldr_optins WHERE guild_id = ?",
+                (guild_id,),
+            )
             return {row[0] for row in cursor.fetchall()}
         except mariadb.Error as e:
             logger.error(f"Error fetching tldr opt-in list: {e}")
