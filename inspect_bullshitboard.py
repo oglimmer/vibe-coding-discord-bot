@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
-"""
-Test script to verify bullshitboard demo data
+"""Print the bullshitboard data currently in the database.
+
+A manual inspection companion to create_demo_data.py: run that to seed
+demo rows, then run this to eyeball how the rankings come out. It asserts
+nothing and needs a live MariaDB, so it is not part of the test suite —
+it lived in tests/ only by filename accident and failed any local
+`pytest tests/` run that had no database.
+
+Usage: python inspect_bullshitboard.py
 """
 
 from database import DatabaseManager
 
 
-def test_bullshitboard():
+def inspect_bullshitboard():
     db = DatabaseManager()
     conn = db._get_connection()
     cursor = conn.cursor()
 
-    print("🎯 BULLSHITBOARD DEMO DATA TEST")
+    print("🎯 BULLSHITBOARD DATA")
     print("=" * 50)
 
     print("\n👥 DEMO USERS:")
@@ -125,8 +132,8 @@ def test_bullshitboard():
         print(f"   {i}. {username} - Avg BS: {avg_score:.2f} ({checks} checks)")
 
     conn.close()
-    print("\n✅ Bullshitboard test completed! The demo data looks great for testing.")
+    print("\n✅ Done.")
 
 
 if __name__ == "__main__":
-    test_bullshitboard()
+    inspect_bullshitboard()
