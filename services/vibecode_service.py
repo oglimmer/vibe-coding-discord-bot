@@ -31,7 +31,7 @@ LOG_TAIL_LINES = 400
 
 PROMPT_TEMPLATE = """You are an autonomous coding agent working on the source code of \
 "vibe-coding-discord-bot", a German-language Discord bot built with discord.py 2.x \
-and MariaDB.
+and PostgreSQL.
 
 Implement the following feature, requested by Discord user "{username}":
 

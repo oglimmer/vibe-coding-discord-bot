@@ -3,7 +3,7 @@
 
 A manual inspection companion to create_demo_data.py: run that to seed
 demo rows, then run this to eyeball how the rankings come out. It asserts
-nothing and needs a live MariaDB, so it is not part of the test suite —
+nothing and needs a live PostgreSQL database, so it is not part of the test suite —
 it lived in tests/ only by filename accident and failed any local
 `pytest tests/` run that had no database.
 

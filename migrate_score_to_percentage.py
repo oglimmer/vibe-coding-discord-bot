@@ -10,7 +10,7 @@ This script:
 Usage: python migrate_score_to_percentage.py
 """
 
-import mariadb
+import psycopg
 import logging
 from config import Config
 from datetime import datetime
@@ -22,16 +22,16 @@ logger = logging.getLogger(__name__)
 def get_connection():
     """Get database connection"""
     try:
-        connection = mariadb.connect(
+        connection = psycopg.connect(
             user=Config.DB_USER,
             password=Config.DB_PASSWORD,
             host=Config.DB_HOST,
             port=Config.DB_PORT,
-            database=Config.DB_NAME,
+            dbname=Config.DB_NAME,
         )
         return connection
-    except mariadb.Error as e:
-        logger.error(f"Error connecting to MariaDB: {e}")
+    except psycopg.Error as e:
+        logger.error(f"Error connecting to PostgreSQL: {e}")
         raise
 
 
@@ -55,7 +55,7 @@ def backup_table():
         logger.info(f"Backup created successfully: {backup_table_name}")
         return backup_table_name
 
-    except mariadb.Error as e:
+    except psycopg.Error as e:
         logger.error(f"Error creating backup: {e}")
         raise
     finally:
@@ -78,7 +78,7 @@ def get_current_scores():
         logger.info(f"Found {len(results)} records with scores to convert")
         return results
 
-    except mariadb.Error as e:
+    except psycopg.Error as e:
         logger.error(f"Error getting current scores: {e}")
         raise
     finally:
@@ -117,16 +117,22 @@ def update_database_schema():
 
         logger.info("Updating database schema to allow 0-100% scores")
 
-        # Remove old constraint and add new one
-        cursor.execute("""
-            ALTER TABLE factcheck_requests
-            MODIFY COLUMN score TINYINT UNSIGNED CHECK (score >= 0 AND score <= 100)
-        """)
+        # Widen the score column and (re)assert the 0-100 range constraint.
+        cursor.execute(
+            "ALTER TABLE factcheck_requests ALTER COLUMN score TYPE SMALLINT"
+        )
+        cursor.execute(
+            "ALTER TABLE factcheck_requests DROP CONSTRAINT IF EXISTS score_range_check"
+        )
+        cursor.execute(
+            "ALTER TABLE factcheck_requests ADD CONSTRAINT score_range_check "
+            "CHECK (score >= 0 AND score <= 100)"
+        )
 
         connection.commit()
         logger.info("Database schema updated successfully")
 
-    except mariadb.Error as e:
+    except psycopg.Error as e:
         logger.error(f"Error updating schema: {e}")
         raise
     finally:
@@ -145,14 +151,14 @@ def apply_score_conversion(conversion_map):
 
         for record_id, scores in conversion_map.items():
             cursor.execute(
-                "UPDATE factcheck_requests SET score = ? WHERE id = ?",
+                "UPDATE factcheck_requests SET score = %s WHERE id = %s",
                 (scores["new_score"], record_id),
             )
 
         connection.commit()
         logger.info(f"Successfully converted {len(conversion_map)} scores")
 
-    except mariadb.Error as e:
+    except psycopg.Error as e:
         logger.error(f"Error applying conversions: {e}")
         raise
     finally:
@@ -183,7 +189,7 @@ def verify_conversion():
         logger.info("✅ All scores are within valid range (0-100%)")
         return True
 
-    except mariadb.Error as e:
+    except psycopg.Error as e:
         logger.error(f"Error verifying conversion: {e}")
         return False
     finally:

@@ -1,0 +1,44 @@
+/*
+ * pgloader control file: one-time MariaDB -> PostgreSQL migration for the
+ * vibe-coding-discord-bot shared database.
+ *
+ * Fill in the two connection strings (host / password) before running, or
+ * export them and use `pgloader vibe-bot.load` from a shell that substitutes
+ * them. pgloader does NOT expand ${ENV} inside this file, so edit the URLs
+ * in place (or template the file) — keep the edited copy OUT of git; it
+ * contains credentials.
+ *
+ * Strategy: full migration (schema + data + indexes) into an EMPTY target
+ * database. `include drop` first drops any objects it is about to (re)create,
+ * so re-running is safe. `reset sequences` advances the BIGSERIAL/SERIAL
+ * sequences past the migrated max(id) so the first post-cutover INSERT does
+ * not collide. Afterwards run post_migrate.sql (see the runbook) to restore
+ * the ON UPDATE CURRENT_TIMESTAMP triggers and the birthdays functional index,
+ * which MySQL-specific features pgloader cannot carry over.
+ */
+LOAD DATABASE
+    FROM     mysql://vibe-bot:CHANGE_ME@MARIADB_HOST:3306/vibe-bot
+    INTO postgresql://vibe-bot:CHANGE_ME@POSTGRES_HOST:5432/vibe-bot
+
+WITH include drop,
+     create tables,
+     create indexes,
+     reset sequences,
+     foreign keys,
+     workers = 4,
+     concurrency = 1
+
+SET maintenance_work_mem to '256MB',
+    work_mem to '48MB'
+
+/*
+ * MariaDB stores "no value" dates as 0000-00-00, which PostgreSQL rejects;
+ * map those to NULL. All datetime columns become plain `timestamp` (no time
+ * zone), matching the schema the bot creates on a fresh install.
+ */
+CAST type datetime to timestamp
+         drop default using zero-dates-to-null,
+     type date
+         drop default using zero-dates-to-null,
+     type timestamp
+         drop default using zero-dates-to-null;

@@ -1,27 +1,27 @@
 
 services:
-  mariadb:
-    image: mariadb
+  postgres:
+    image: postgres:16
     volumes:
-      - mariadb_data:/var/lib/mysql
+      - postgres_data:/var/lib/postgresql/data
     environment:
-      - MARIADB_ROOT_PASSWORD=root
-      - MARIADB_DATABASE=vibe-bot
-      - MARIADB_USER=vibe-bot
-      - MARIADB_PASSWORD=foobar
+      - POSTGRES_DB=vibe-bot
+      - POSTGRES_USER=vibe-bot
+      - POSTGRES_PASSWORD=foobar
     healthcheck:
-      test: mariadb -uvibe-bot -pfoobar vibe-bot -e "select 1"
+      test: ["CMD-SHELL", "pg_isready -U vibe-bot -d vibe-bot"]
       interval: 3s
       timeout: 60s
       retries: 5
       start_period: 10s
       start_interval: 3s
     ports:
-      - "3306:3306"
+      - "5432:5432"
   bot:
     build: .
     environment:
-      - DB_HOST=mariadb
+      - DB_HOST=postgres
+      - DB_PORT=5432
       - DB_NAME=vibe-bot
       - DB_USER=vibe-bot
       - DB_PASSWORD=foobar
@@ -43,8 +43,8 @@ services:
       - POSTILLON_DELIVERY_DELAY_SECONDS=${POSTILLON_DELIVERY_DELAY_SECONDS:-1}
       - POSTILLON_LEASE_SECONDS=${POSTILLON_LEASE_SECONDS:-1800}
     depends_on:
-        mariadb:
+        postgres:
             condition: service_healthy
 
 volumes:
-  mariadb_data:
+  postgres_data:

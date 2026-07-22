@@ -8,7 +8,7 @@ from services.postillon.models import PostillonPost
 
 
 @unittest.skipUnless(
-    os.getenv("POSTILLON_DB_TEST") == "1", "requires a disposable MariaDB database"
+    os.getenv("POSTILLON_DB_TEST") == "1", "requires a disposable PostgreSQL database"
 )
 class PostillonDatabaseIntegrationTest(unittest.TestCase):
     def setUp(self):
@@ -25,13 +25,13 @@ class PostillonDatabaseIntegrationTest(unittest.TestCase):
         try:
             cursor = connection.cursor()
             hashes = [post.identity_hash for post in self.posts]
-            placeholders = ",".join("?" for _ in hashes)
+            placeholders = ",".join("%s" for _ in hashes)
             cursor.execute(
                 f"DELETE FROM postillon_posts WHERE identity_hash IN ({placeholders})",
                 tuple(hashes),
             )
             cursor.execute(
-                "DELETE FROM postillon_feed_state WHERE feed_key = ?", (self.feed_key,)
+                "DELETE FROM postillon_feed_state WHERE feed_key = %s", (self.feed_key,)
             )
             connection.commit()
         finally:

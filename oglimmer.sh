@@ -11,10 +11,14 @@
 #   * Fails loud — any error aborts with a non-zero exit code.
 #
 # Usage:
-#   ./oglimmer.sh test                  Lint + tests on host, DB-less (mariadb stub)
-#   ./oglimmer.sh test --with-mariadb   Same suite in Docker w/ real MariaDB connector
-#   ./oglimmer.sh help                  Show available commands
+#   ./oglimmer.sh test          Lint + tests on the host venv
+#   ./oglimmer.sh test --docker  Same suite in a clean-room Docker container
+#   ./oglimmer.sh help          Show available commands
 #
+# The PostgreSQL driver is psycopg[binary], a self-contained wheel that bundles
+# libpq — it installs from PyPI on a fresh clone with no system libraries, so
+# both modes just `pip install`. The DB-touching tests are gated
+# (POSTILLON_DB_TEST) or use an in-memory fake, so no PostgreSQL server is needed.
 set -euo pipefail
 
 # --- Resolve repo root regardless of caller's CWD --------------------------
@@ -23,7 +27,6 @@ cd "$SCRIPT_DIR"
 
 # --- Configuration ---------------------------------------------------------
 VENV_DIR="${OGLIMMER_VENV:-$SCRIPT_DIR/.venv}"
-STUB_DIR="$VENV_DIR/_stubs"   # holds the import-only 'mariadb' stub (lite mode)
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 RUFF_VERSION="0.8.4"   # keep in sync with .pre-commit-config.yaml / ci.yml
 
@@ -41,37 +44,10 @@ die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 # Run a child command with stdin closed so nothing can ever block on input.
 run() { "$@" </dev/null; }
 
-# Write an import-only stub of the 'mariadb' package. It lets
-# `from database import DatabaseManager` (and Mock(spec=DatabaseManager))
-# resolve without the C connector. Any real connection attempt raises — the
-# only DB-touching tests are gated/uncollected by default, so nothing calls it.
-make_mariadb_stub() {
-  mkdir -p "$STUB_DIR"
-  cat > "$STUB_DIR/mariadb.py" <<'PY'
-"""Import-only stub of the 'mariadb' package (oglimmer.sh lite test mode)."""
-
-
-class Error(Exception):
-    pass
-
-
-class IntegrityError(Error):
-    pass
-
-
-def connect(*args, **kwargs):
-    raise RuntimeError(
-        "mariadb stub active: real DB access unavailable. "
-        "Run './oglimmer.sh test --with-mariadb' for the full suite."
-    )
-PY
-}
-
-# --- Environment provisioning (lite mode) ----------------------------------
-# Creates the host venv on first run and installs everything EXCEPT the
-# C-backed 'mariadb' package, then drops in the import stub — no system
-# libraries needed, works on a fresh clone. A stamp keyed on the requirements
-# skips reinstalls when they haven't changed.
+# --- Environment provisioning ----------------------------------------------
+# Creates the host venv on first run and installs all dependencies. The
+# psycopg[binary] wheel needs no system libraries, so this works on a fresh
+# clone. A stamp keyed on the requirements skips reinstalls when unchanged.
 ensure_venv() {
   command -v "$PYTHON_BIN" >/dev/null 2>&1 \
     || die "$PYTHON_BIN not found on PATH. Install Python 3.12+ first."
@@ -82,22 +58,14 @@ ensure_venv() {
   fi
 
   local py="$VENV_DIR/bin/python"
-  local stamp="$VENV_DIR/.deps-lite.stamp"
+  local stamp="$VENV_DIR/.deps.stamp"
   local sig
-  sig="mode=lite"$'\n'"$(cat requirements.txt requirements-dev.txt)"
+  sig="$(cat requirements.txt requirements-dev.txt)"
 
   if [ ! -f "$stamp" ] || ! printf '%s' "$sig" | cmp -s - "$stamp"; then
-    log "Installing dependencies (lite, no mariadb connector)"
+    log "Installing dependencies"
     run "$py" -m pip install --upgrade pip
-    # Install everything except the 'mariadb' line; substitute the stub.
-    local tmp; tmp="$(mktemp -d)"
-    grep -ivE '^mariadb[=<>! ]' requirements.txt > "$tmp/req.txt" || true
-    grep -ivE '^(-r[[:space:]]|mariadb[=<>! ])' requirements-dev.txt \
-      > "$tmp/req-dev.txt" || true
-    run "$py" -m pip install -r "$tmp/req.txt"
-    run "$py" -m pip install -r "$tmp/req-dev.txt"
-    rm -rf "$tmp"
-    make_mariadb_stub
+    run "$py" -m pip install -r requirements-dev.txt
     printf '%s' "$sig" > "$stamp"
   fi
 
@@ -108,34 +76,29 @@ ensure_venv() {
   fi
 }
 
-# --- Full suite in Docker (real mariadb connector) -------------------------
-# Runs the exact CI recipe inside a container that ships git + build tools and
-# where we apt-install libmariadb-dev, so the real 'mariadb' wheel builds and
-# imports for real. Needs no MariaDB *server*: the only DB-touching tests are
-# gated (POSTILLON_DB_TEST) or uncollected, same as CI. Source is mounted
+# --- Full suite in a clean-room Docker container ---------------------------
+# Runs the exact CI recipe inside a stock python image. Source is mounted
 # read-only; all caches/bytecode are redirected to /tmp so the host tree and
-# the host .venv are never touched.
+# the host .venv are never touched. Needs only Docker — no host libs, no DB
+# server (psycopg[binary] installs from PyPI, DB tests are gated/faked).
 run_full_in_docker() {
   command -v docker >/dev/null 2>&1 \
-    || die "Docker not found. '--with-mariadb' runs the suite in a container and needs Docker."
+    || die "Docker not found. '--docker' runs the suite in a container and needs Docker."
   run docker info >/dev/null 2>&1 \
     || die "Docker daemon not reachable. Start Docker Desktop / the daemon and retry."
 
   local image="${OGLIMMER_DOCKER_IMAGE:-python:3.12}"
-  log "Full suite (real mariadb) in Docker: $image"
+  log "Full suite in Docker: $image"
 
-  # Inner script runs as root (needed for apt); set -euo pipefail so any step
-  # aborts the container with a non-zero status.
+  # Inner script runs as root; set -euo pipefail so any step aborts the
+  # container with a non-zero status.
   run docker run --rm \
     -v "$SCRIPT_DIR:/app:ro" -w /app \
     -e PIP_DISABLE_PIP_VERSION_CHECK=1 -e PIP_NO_INPUT=1 \
     -e DEBIAN_FRONTEND=noninteractive \
     -e PYTHONPYCACHEPREFIX=/tmp/pyc -e RUFF_CACHE_DIR=/tmp/ruff \
     "$image" bash -euo pipefail -c '
-      echo "==> apt: libmariadb-dev + client"
-      apt-get update -qq >/dev/null
-      apt-get install -y -qq libmariadb-dev mariadb-client >/dev/null
-      echo "==> pip install (real mariadb connector + dev deps)"
+      echo "==> pip install (deps incl. psycopg[binary])"
       python -m pip install --quiet --upgrade pip
       python -m pip install --quiet "ruff=='"$RUFF_VERSION"'" -r requirements-dev.txt
       echo "==> ruff lint";          ruff check .
@@ -150,28 +113,28 @@ run_full_in_docker() {
 
 # --- Commands --------------------------------------------------------------
 cmd_test() {
-  local mode=lite
+  local mode=host
   for arg in "$@"; do
     case "$arg" in
-      --with-mariadb|--full) mode=full ;;
-      -h|--help) echo "usage: oglimmer.sh test [--with-mariadb]"; return 0 ;;
+      --docker|--full) mode=docker ;;
+      # Deprecated alias from the MariaDB era — kept so old muscle memory works.
+      --with-postgres|--with-mariadb)
+        warn "$arg is deprecated; use --docker"; mode=docker ;;
+      -h|--help) echo "usage: oglimmer.sh test [--docker]"; return 0 ;;
       *) die "unknown option for 'test': $arg" ;;
     esac
   done
 
-  if [ "$mode" = full ]; then
+  if [ "$mode" = docker ]; then
     run_full_in_docker
-    log "All checks passed (mode: full / docker)."
+    log "All checks passed (mode: docker)."
     return 0
   fi
 
-  # --- lite: host venv + mariadb import stub -------------------------------
+  # --- host: host venv -----------------------------------------------------
   ensure_venv
   local py="$VENV_DIR/bin/python"
   local ruff="$VENV_DIR/bin/ruff"
-
-  export PYTHONPATH="$STUB_DIR${PYTHONPATH:+:$PYTHONPATH}"
-  log "mariadb: import stub (DB-less). Use --with-mariadb for the real connector."
 
   log "Ruff lint"
   run "$ruff" check .
@@ -189,7 +152,7 @@ cmd_test() {
   find . -name '*.py' -not -path './.venv/*' -not -path './venv/*' -print0 \
     | xargs -0 "$py" -m py_compile
 
-  log "All checks passed (mode: lite)."
+  log "All checks passed (mode: host)."
 }
 
 cmd_help() {
@@ -197,24 +160,22 @@ cmd_help() {
 oglimmer.sh — project task runner
 
 Commands:
-  test [--with-mariadb]
+  test [--docker]
           Provision venv (first run) then run lint + full test suite (mirrors CI):
             ruff check . / ruff format --check .
             python -m unittest discover tests
             python -m pytest tests/test_e2e_1337.py
             py_compile syntax sweep
-          Default (lite): runs on the host venv, skips the C-backed 'mariadb'
-          package and uses an import stub — no system libraries needed, works
-          on a fresh clone.
-          --with-mariadb (--full): runs the same suite inside Docker with the
-          real MariaDB connector. Needs only Docker — no host libs, no DB
-          server. Always works as long as the Docker daemon is running.
+          Default (host): runs on the host venv. psycopg[binary] installs from
+          PyPI with no system libraries, so this works on a fresh clone.
+          --docker (--full): runs the same suite inside a clean-room Docker
+          container. Needs only Docker — no host libs, no DB server.
   help    Show this message
 
 Env overrides:
   OGLIMMER_VENV          host venv location    (default: ./.venv)
   PYTHON_BIN             base python           (default: python3)
-  OGLIMMER_DOCKER_IMAGE  full-mode image       (default: python:3.12)
+  OGLIMMER_DOCKER_IMAGE  docker-mode image     (default: python:3.12)
 EOF
 }
 

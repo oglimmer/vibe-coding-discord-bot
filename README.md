@@ -1,26 +1,26 @@
 # Discord Greeting Bot
 
-A professional Discord bot written in Python 3.12 that responds to greetings with wave emojis and tracks greeting statistics in a MariaDB database.
+A professional Discord bot written in Python 3.12 that responds to greetings with wave emojis and tracks greeting statistics in a PostgreSQL database.
 
 ## Features
 
 - **Automatic Greeting Response**: Responds with 👋 emoji to messages containing "morning", "good morning", or "gn"
-- **Greeting Tracking**: Saves user greeting data to MariaDB database with timestamps
+- **Greeting Tracking**: Saves user greeting data to PostgreSQL database with timestamps
 - **Daily Statistics**: `/greetings` slash command shows daily greeting statistics
 - **AI-Powered Internet Troll**: Automatically analyzes longer messages (>100 chars) with configurable probability and acts as a humorous contrarian troll via ChatGPT API (requires user opt-in)
 - **Reaction-Based Fact Checking**: Users can react with 🔍 emoji to any message to request a detailed fact-check with numerical scoring (0-9 scale)
 - **TL;DR Summaries**: `/tldr` summarizes the recent messages of a channel via DeepSeek (optionally scoped to the last N messages or the last hour / 24 hours); opt-in only — only messages from users who ran `/tldr_optin` are summarized (revert with `/tldr_optout`)
 - **Vibecode (self-extending bot)**: `/vibecode` spawns a Kubernetes Job in which an agentic coding AI (Claude Code + DeepSeek) implements the requested feature in this repository, verifies it with the test suite and ruff, opens a pull request, and works through the AI reviewer's findings until it is approved
-- **Postillon RSS archive**: Polls for new Postillon articles every 15 minutes, stores them in MariaDB, and publishes new entries as Discord embeds
+- **Postillon RSS archive**: Polls for new Postillon articles every 15 minutes, stores them in PostgreSQL, and publishes new entries as Discord embeds
 - **Birthday greetings**: `/birthday-set` stores a birthday, and the bot congratulates the user at 08:00 (Europe/Berlin) with a randomly varied message
 - **Professional Architecture**: Extensible command and message handler system
 - **Comprehensive Logging**: Detailed logging for monitoring and debugging
-- **Database Management**: Professional MariaDB integration with proper connection handling
+- **Database Management**: Professional PostgreSQL integration with proper connection handling
 
 ## Requirements
 
 - Python 3.12+
-- MariaDB database server
+- PostgreSQL database server
 - Discord bot token
 
 or just go with
@@ -80,7 +80,7 @@ cd discord-greeting-bot
 pip install -r requirements.txt
 ```
 
-3. Set up your MariaDB database:
+3. Set up your PostgreSQL database:
 ```sql
 CREATE DATABASE discord_bot;
 ```
@@ -93,7 +93,7 @@ Edit `.env` and add your configuration:
 ```
 DISCORD_TOKEN=your_discord_bot_token_here
 DB_HOST=localhost
-DB_PORT=3306
+DB_PORT=5432
 DB_USER=your_database_user
 DB_PASSWORD=your_database_password
 DB_NAME=discord_bot
@@ -237,7 +237,7 @@ Developer Mode in Discord, right-click the channel, and select **Copy Channel
 ID**. The bot needs the `View Channel`, `Send Messages`, and `Embed Links`
 permissions in that channel.
 
-3. Build and start MariaDB and the bot:
+3. Build and start PostgreSQL and the bot:
 
 ```bash
 docker compose up --build
@@ -263,8 +263,8 @@ docker compose down
 
 ### Start directly with Python
 
-Python 3.12, MariaDB development libraries, and a running MariaDB server are
-required. Configure `.env`, then run:
+Python 3.12 and a running PostgreSQL server are required (the psycopg[binary]
+driver bundles libpq, so no client libraries are needed). Configure `.env`, then run:
 
 ```bash
 python3.12 -m venv .venv

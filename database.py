@@ -1,4 +1,5 @@
-import mariadb
+import hashlib
+import psycopg
 import logging
 from config import Config
 import dataclasses
@@ -11,6 +12,21 @@ from zoneinfo import ZoneInfo
 logger = logging.getLogger(__name__)
 
 GERMANY_TZ = ZoneInfo("Europe/Berlin")
+
+
+def _game_lock_key(game_date) -> int:
+    """Stable signed 64-bit key for a game_date, used with pg_advisory_xact_lock.
+
+    On MariaDB the 1337 flow serialized bet inserts against winner
+    determination with a SELECT ... FOR UPDATE gap lock on the (absent)
+    winner row. PostgreSQL takes no gap lock when the row is missing, so
+    save_1337_bet and decide_winner_atomically instead take a
+    transaction-scoped advisory lock on this key. Both derive the key from
+    game_date alone, so they contend on exactly the same lock; it releases
+    automatically at COMMIT/ROLLBACK.
+    """
+    digest = hashlib.blake2b(str(game_date).encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big", signed=True)
 
 
 @dataclasses.dataclass
@@ -27,16 +43,16 @@ class DatabaseManager:
     def _get_connection(self):
         """Get a fresh database connection for each operation"""
         try:
-            connection = mariadb.connect(
+            connection = psycopg.connect(
                 user=Config.DB_USER,
                 password=Config.DB_PASSWORD,
                 host=Config.DB_HOST,
                 port=Config.DB_PORT,
-                database=Config.DB_NAME,
+                dbname=Config.DB_NAME,
             )
             return connection
-        except mariadb.Error as e:
-            logger.error(f"Error connecting to MariaDB: {e}")
+        except psycopg.Error as e:
+            logger.error(f"Error connecting to PostgreSQL: {e}")
             raise
 
     def create_tables(self):
@@ -46,7 +62,7 @@ class DatabaseManager:
             cursor = connection.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS greetings (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id SERIAL PRIMARY KEY,
                     user_id BIGINT NOT NULL,
                     username VARCHAR(255) NOT NULL,
                     greeting_message TEXT,
@@ -54,28 +70,19 @@ class DatabaseManager:
                     greeting_time TIME NOT NULL,
                     server_id BIGINT,
                     channel_id BIGINT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_user_date (user_id, greeting_date),
-                    INDEX idx_date (greeting_date)
+                    message_id BIGINT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-
-            # Migration: Add message_id column if it doesn't exist
-            try:
-                cursor.execute("ALTER TABLE greetings ADD COLUMN message_id BIGINT")
-                cursor.execute(
-                    "ALTER TABLE greetings ADD INDEX idx_message_id (message_id)"
-                )
-                logger.info("Added message_id column to greetings table")
-            except mariadb.Error as e:
-                if "Duplicate column name" in str(e):
-                    logger.info("message_id column already exists in greetings table")
-                else:
-                    logger.warning(f"Could not add message_id column: {e}")
+            # Kept for databases migrated from MariaDB, where message_id was
+            # added by an ALTER rather than being part of the base schema.
+            cursor.execute(
+                "ALTER TABLE greetings ADD COLUMN IF NOT EXISTS message_id BIGINT"
+            )
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS greeting_reactions (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id SERIAL PRIMARY KEY,
                     greeting_id INT NOT NULL,
                     user_id BIGINT NOT NULL,
                     username VARCHAR(255) NOT NULL,
@@ -84,62 +91,56 @@ class DatabaseManager:
                     reaction_time TIME NOT NULL,
                     server_id BIGINT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (greeting_id) REFERENCES greetings(id) ON DELETE CASCADE,
-                    UNIQUE KEY unique_reaction (greeting_id, user_id, reaction_emoji),
-                    INDEX idx_greeting_id (greeting_id),
-                    INDEX idx_user_id (user_id),
-                    INDEX idx_reaction_date (reaction_date)
+                    CONSTRAINT unique_reaction
+                        UNIQUE (greeting_id, user_id, reaction_emoji),
+                    FOREIGN KEY (greeting_id) REFERENCES greetings(id) ON DELETE CASCADE
                 )
             """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS game_1337_bets (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id SERIAL PRIMARY KEY,
                     user_id BIGINT NOT NULL,
                     username VARCHAR(255) NOT NULL,
-                    play_time DATETIME(3) NOT NULL,
+                    play_time TIMESTAMP(3) NOT NULL,
                     game_date DATE NOT NULL,
-                    bet_type ENUM('regular', 'early_bird') NOT NULL DEFAULT 'regular',
+                    bet_type VARCHAR(20) NOT NULL DEFAULT 'regular'
+                        CHECK (bet_type IN ('regular', 'early_bird')),
                     server_id BIGINT,
                     channel_id BIGINT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE KEY unique_user_per_day (user_id, game_date),
-                    INDEX idx_game_date (game_date),
-                    INDEX idx_user_id (user_id),
-                    INDEX idx_play_time (play_time)
+                    CONSTRAINT unique_user_per_day UNIQUE (user_id, game_date)
                 )
             """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS game_1337_winners (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id SERIAL PRIMARY KEY,
                     user_id BIGINT NOT NULL,
                     username VARCHAR(255) NOT NULL,
                     game_date DATE NOT NULL,
-                    win_time DATETIME(3) NOT NULL,
-                    play_time DATETIME(3) NOT NULL,
-                    bet_type ENUM('regular', 'early_bird') NOT NULL,
+                    win_time TIMESTAMP(3) NOT NULL,
+                    play_time TIMESTAMP(3) NOT NULL,
+                    bet_type VARCHAR(20) NOT NULL
+                        CHECK (bet_type IN ('regular', 'early_bird')),
                     millisecond_diff INT NOT NULL,
                     server_id BIGINT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE KEY unique_date (game_date),
-                    INDEX idx_user_id (user_id),
-                    INDEX idx_game_date (game_date)
+                    CONSTRAINT unique_date UNIQUE (game_date)
                 )
             """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS game_1337_roles (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id SERIAL PRIMARY KEY,
                     guild_id BIGINT NOT NULL,
                     user_id BIGINT NOT NULL,
-                    role_type ENUM('sergeant', 'commander', 'general') NOT NULL,
+                    role_type VARCHAR(20) NOT NULL
+                        CHECK (role_type IN ('sergeant', 'commander', 'general')),
                     role_id BIGINT NOT NULL,
                     assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY unique_guild_role (guild_id, role_type),
-                    INDEX idx_guild_user (guild_id, user_id),
-                    INDEX idx_user_id (user_id)
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT unique_guild_role UNIQUE (guild_id, role_type)
                 )
             """)
 
@@ -148,8 +149,7 @@ class DatabaseManager:
                     user_id BIGINT PRIMARY KEY,
                     opted_in BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX idx_opted_in (opted_in)
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
@@ -164,7 +164,7 @@ class DatabaseManager:
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS factcheck_requests (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id SERIAL PRIMARY KEY,
                     requester_user_id BIGINT NOT NULL,
                     requester_username VARCHAR(255) NOT NULL,
                     target_message_id BIGINT NOT NULL,
@@ -172,42 +172,43 @@ class DatabaseManager:
                     target_username VARCHAR(255) NOT NULL,
                     message_content TEXT NOT NULL,
                     request_date DATE NOT NULL,
-                    score TINYINT UNSIGNED CHECK (score >= 0 AND score <= 100),
+                    score SMALLINT CHECK (score >= 0 AND score <= 100),
                     factcheck_response TEXT,
                     is_factcheckable BOOLEAN DEFAULT TRUE,
                     server_id BIGINT,
                     channel_id BIGINT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_requester_date (requester_user_id, request_date),
-                    INDEX idx_target_message (target_message_id),
-                    INDEX idx_request_date (request_date),
-                    INDEX idx_factcheckable (is_factcheckable)
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Kept for databases migrated from MariaDB, where is_factcheckable
+            # was added by an ALTER rather than the base schema.
+            cursor.execute(
+                "ALTER TABLE factcheck_requests "
+                "ADD COLUMN IF NOT EXISTS is_factcheckable BOOLEAN DEFAULT TRUE"
+            )
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ai_response_cache (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id SERIAL PRIMARY KEY,
                     message_content_hash VARCHAR(64) NOT NULL,
                     message_content TEXT NOT NULL,
-                    response_type ENUM('klugscheiss', 'factcheck') NOT NULL,
+                    response_type VARCHAR(20) NOT NULL
+                        CHECK (response_type IN ('klugscheiss', 'factcheck')),
                     ai_response TEXT NOT NULL,
-                    score TINYINT NULL,
+                    score SMALLINT NULL,
                     hit_count INT DEFAULT 1,
                     first_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY unique_hash_type (message_content_hash, response_type),
-                    INDEX idx_hash (message_content_hash),
-                    INDEX idx_type (response_type),
-                    INDEX idx_last_used (last_used)
+                    last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT unique_hash_type
+                        UNIQUE (message_content_hash, response_type)
                 )
             """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS postillon_posts (
-                    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                    identity_hash CHAR(64) CHARACTER SET ascii NOT NULL,
-                    url_hash CHAR(64) CHARACTER SET ascii NOT NULL,
+                    id BIGSERIAL PRIMARY KEY,
+                    identity_hash CHAR(64) NOT NULL,
+                    url_hash CHAR(64) NOT NULL,
                     external_id VARCHAR(512),
                     title TEXT NOT NULL,
                     url VARCHAR(2048) NOT NULL,
@@ -215,38 +216,34 @@ class DatabaseManager:
                     summary_text TEXT,
                     image_url VARCHAR(2048),
                     categories_json TEXT,
-                    published_at DATETIME,
-                    source_updated_at DATETIME,
-                    content_hash CHAR(64) CHARACTER SET ascii NOT NULL,
+                    published_at TIMESTAMP,
+                    source_updated_at TIMESTAMP,
+                    content_hash CHAR(64) NOT NULL,
                     first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                        ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY unique_postillon_identity (identity_hash),
-                    UNIQUE KEY unique_postillon_url (url_hash),
-                    INDEX idx_postillon_published (published_at),
-                    INDEX idx_postillon_first_seen (first_seen_at)
+                    last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT unique_postillon_identity UNIQUE (identity_hash),
+                    CONSTRAINT unique_postillon_url UNIQUE (url_hash)
                 )
             """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS postillon_deliveries (
-                    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                    post_id BIGINT UNSIGNED NOT NULL,
+                    id BIGSERIAL PRIMARY KEY,
+                    post_id BIGINT NOT NULL,
                     channel_id BIGINT NOT NULL,
-                    status ENUM('pending', 'sending', 'sent') NOT NULL
-                        DEFAULT 'pending',
-                    attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
-                    claimed_at DATETIME,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'sending', 'sent')),
+                    attempt_count INT NOT NULL DEFAULT 0,
+                    claimed_at TIMESTAMP,
                     discord_message_id BIGINT,
-                    delivered_at DATETIME,
+                    delivered_at TIMESTAMP,
                     last_error TEXT,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                        ON UPDATE CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT unique_postillon_post_channel
+                        UNIQUE (post_id, channel_id),
                     FOREIGN KEY (post_id) REFERENCES postillon_posts(id)
-                        ON DELETE CASCADE,
-                    UNIQUE KEY unique_postillon_post_channel (post_id, channel_id),
-                    INDEX idx_postillon_delivery_work (status, claimed_at)
+                        ON DELETE CASCADE
                 )
             """)
 
@@ -255,14 +252,13 @@ class DatabaseManager:
                     feed_key VARCHAR(191) PRIMARY KEY,
                     etag VARCHAR(512),
                     last_modified VARCHAR(512),
-                    last_attempt_at DATETIME,
-                    last_success_at DATETIME,
+                    last_attempt_at TIMESTAMP,
+                    last_success_at TIMESTAMP,
                     last_error TEXT,
                     initial_sync_completed BOOLEAN NOT NULL DEFAULT FALSE,
                     lease_owner VARCHAR(255),
-                    lease_until DATETIME,
+                    lease_until TIMESTAMP,
                     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                        ON UPDATE CURRENT_TIMESTAMP
                 )
             """)
 
@@ -272,15 +268,9 @@ class DatabaseManager:
                     username VARCHAR(255) NOT NULL,
                     birthday DATE NOT NULL,
                     server_id BIGINT NOT NULL,
-                    birthday_month INT AS (MONTH(birthday)) VIRTUAL,
-                    birthday_day INT AS (DAYOFMONTH(birthday)) VIRTUAL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        ON UPDATE CURRENT_TIMESTAMP,
-                    PRIMARY KEY (user_id, server_id),
-                    INDEX idx_birthday_server_month_day (
-                        server_id, birthday_month, birthday_day
-                    )
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, server_id)
                 )
             """)
 
@@ -293,31 +283,134 @@ class DatabaseManager:
                 )
             """)
 
-            # Migration: Add is_factcheckable column if it doesn't exist
-            try:
-                cursor.execute(
-                    "ALTER TABLE factcheck_requests ADD COLUMN is_factcheckable BOOLEAN DEFAULT TRUE"
-                )
-                cursor.execute(
-                    "ALTER TABLE factcheck_requests ADD INDEX idx_factcheckable (is_factcheckable)"
-                )
-                logger.info("Added is_factcheckable column to factcheck_requests table")
-            except mariadb.Error as e:
-                if "Duplicate column name" in str(e):
-                    logger.info(
-                        "is_factcheckable column already exists in factcheck_requests table"
-                    )
-                else:
-                    logger.warning(f"Could not add is_factcheckable column: {e}")
+            self._create_indexes(cursor)
+            self._create_updated_at_triggers(cursor)
 
             connection.commit()
             logger.info("Database tables created successfully")
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error creating tables: {e}")
             raise
         finally:
             if connection:
                 connection.close()
+
+    def _create_indexes(self, cursor):
+        """Create the non-constraint secondary indexes.
+
+        On PostgreSQL index names are unique per schema (not per table as on
+        MariaDB), so each name is prefixed with its table. The birthday
+        lookup index is functional — it replaces the MariaDB
+        birthday_month / birthday_day VIRTUAL generated columns, which
+        get_birthdays_for_today now derives with EXTRACT.
+        """
+        index_statements = [
+            "CREATE INDEX IF NOT EXISTS idx_greetings_user_date "
+            "ON greetings (user_id, greeting_date)",
+            "CREATE INDEX IF NOT EXISTS idx_greetings_date "
+            "ON greetings (greeting_date)",
+            "CREATE INDEX IF NOT EXISTS idx_greetings_message_id "
+            "ON greetings (message_id)",
+            "CREATE INDEX IF NOT EXISTS idx_greeting_reactions_greeting_id "
+            "ON greeting_reactions (greeting_id)",
+            "CREATE INDEX IF NOT EXISTS idx_greeting_reactions_user_id "
+            "ON greeting_reactions (user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_greeting_reactions_reaction_date "
+            "ON greeting_reactions (reaction_date)",
+            "CREATE INDEX IF NOT EXISTS idx_bets_game_date "
+            "ON game_1337_bets (game_date)",
+            "CREATE INDEX IF NOT EXISTS idx_bets_user_id "
+            "ON game_1337_bets (user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_bets_play_time "
+            "ON game_1337_bets (play_time)",
+            "CREATE INDEX IF NOT EXISTS idx_winners_user_id "
+            "ON game_1337_winners (user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_winners_game_date "
+            "ON game_1337_winners (game_date)",
+            "CREATE INDEX IF NOT EXISTS idx_roles_guild_user "
+            "ON game_1337_roles (guild_id, user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_roles_user_id "
+            "ON game_1337_roles (user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_klug_opted_in "
+            "ON klugscheisser_user_preferences (opted_in)",
+            "CREATE INDEX IF NOT EXISTS idx_factcheck_requester_date "
+            "ON factcheck_requests (requester_user_id, request_date)",
+            "CREATE INDEX IF NOT EXISTS idx_factcheck_target_message "
+            "ON factcheck_requests (target_message_id)",
+            "CREATE INDEX IF NOT EXISTS idx_factcheck_request_date "
+            "ON factcheck_requests (request_date)",
+            "CREATE INDEX IF NOT EXISTS idx_factcheck_factcheckable "
+            "ON factcheck_requests (is_factcheckable)",
+            "CREATE INDEX IF NOT EXISTS idx_ai_cache_hash "
+            "ON ai_response_cache (message_content_hash)",
+            "CREATE INDEX IF NOT EXISTS idx_ai_cache_type "
+            "ON ai_response_cache (response_type)",
+            "CREATE INDEX IF NOT EXISTS idx_ai_cache_last_used "
+            "ON ai_response_cache (last_used)",
+            "CREATE INDEX IF NOT EXISTS idx_postillon_published "
+            "ON postillon_posts (published_at)",
+            "CREATE INDEX IF NOT EXISTS idx_postillon_first_seen "
+            "ON postillon_posts (first_seen_at)",
+            "CREATE INDEX IF NOT EXISTS idx_postillon_delivery_work "
+            "ON postillon_deliveries (status, claimed_at)",
+            "CREATE INDEX IF NOT EXISTS idx_birthday_server_month_day "
+            "ON birthdays (server_id, EXTRACT(MONTH FROM birthday), "
+            "EXTRACT(DAY FROM birthday))",
+        ]
+        for statement in index_statements:
+            cursor.execute(statement)
+
+    def _create_updated_at_triggers(self, cursor):
+        """Recreate the auto-touch behavior of MariaDB's ON UPDATE CURRENT_TIMESTAMP.
+
+        PostgreSQL has no ON UPDATE clause, so a BEFORE UPDATE trigger bumps
+        the relevant timestamp column on every row change. Triggers are
+        dropped and recreated so this stays idempotent across startups.
+        """
+        cursor.execute("""
+            CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
+            BEGIN
+                NEW.updated_at = CURRENT_TIMESTAMP;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+        """)
+        cursor.execute("""
+            CREATE OR REPLACE FUNCTION set_last_used() RETURNS trigger AS $$
+            BEGIN
+                NEW.last_used = CURRENT_TIMESTAMP;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+        """)
+        cursor.execute("""
+            CREATE OR REPLACE FUNCTION set_last_seen_at() RETURNS trigger AS $$
+            BEGIN
+                NEW.last_seen_at = CURRENT_TIMESTAMP;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+        """)
+
+        triggers = [
+            ("trg_roles_updated_at", "game_1337_roles", "set_updated_at"),
+            (
+                "trg_klug_updated_at",
+                "klugscheisser_user_preferences",
+                "set_updated_at",
+            ),
+            ("trg_feed_state_updated_at", "postillon_feed_state", "set_updated_at"),
+            ("trg_deliveries_updated_at", "postillon_deliveries", "set_updated_at"),
+            ("trg_birthdays_updated_at", "birthdays", "set_updated_at"),
+            ("trg_ai_cache_last_used", "ai_response_cache", "set_last_used"),
+            ("trg_postillon_last_seen", "postillon_posts", "set_last_seen_at"),
+        ]
+        for trigger_name, table, function in triggers:
+            cursor.execute(f"DROP TRIGGER IF EXISTS {trigger_name} ON {table}")
+            cursor.execute(
+                f"CREATE TRIGGER {trigger_name} BEFORE UPDATE ON {table} "
+                f"FOR EACH ROW EXECUTE FUNCTION {function}()"
+            )
 
     def get_todays_greetings(
         self, guild_id: Optional[int] = None
@@ -340,13 +433,13 @@ class DatabaseManager:
                     INNER JOIN (
                         SELECT user_id, MAX(greeting_time) as max_time
                         FROM greetings
-                        WHERE server_id = ? AND greeting_date = ?
+                        WHERE server_id = %s AND greeting_date = %s
                         GROUP BY user_id
                     ) latest ON g.user_id = latest.user_id AND g.greeting_time = latest.max_time
                     LEFT JOIN greeting_reactions gr ON g.id = gr.greeting_id
-                                                    AND gr.reaction_date = ?
+                                                    AND gr.reaction_date = %s
                                                     AND gr.user_id != g.user_id
-                    WHERE g.server_id = ? AND g.greeting_date = ?
+                    WHERE g.server_id = %s AND g.greeting_date = %s
                     GROUP BY g.id, g.username, g.greeting_time
                     ORDER BY g.greeting_time ASC
                 """,
@@ -360,13 +453,13 @@ class DatabaseManager:
                     INNER JOIN (
                         SELECT user_id, MAX(greeting_time) as max_time
                         FROM greetings
-                        WHERE greeting_date = ?
+                        WHERE greeting_date = %s
                         GROUP BY user_id
                     ) latest ON g.user_id = latest.user_id AND g.greeting_time = latest.max_time
                     LEFT JOIN greeting_reactions gr ON g.id = gr.greeting_id
-                                                    AND gr.reaction_date = ?
+                                                    AND gr.reaction_date = %s
                                                     AND gr.user_id != g.user_id
-                    WHERE g.greeting_date = ?
+                    WHERE g.greeting_date = %s
                     GROUP BY g.id, g.username, g.greeting_time
                     ORDER BY g.greeting_time ASC
                 """,
@@ -380,7 +473,7 @@ class DatabaseManager:
                 )
                 for row in results
             ]
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching today's greetings: {e}")
             return []
         finally:
@@ -407,7 +500,8 @@ class DatabaseManager:
             cursor.execute(
                 """
                 INSERT INTO greetings (user_id, username, greeting_message, greeting_date, greeting_time, server_id, channel_id, message_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
             """,
                 (
                     user_id,
@@ -421,13 +515,13 @@ class DatabaseManager:
                 ),
             )
 
-            greeting_id = cursor.lastrowid
+            greeting_id = cursor.fetchone()[0]
             connection.commit()
             logger.info(
                 f"Saved greeting for user {username} ({user_id}) with ID {greeting_id}"
             )
             return greeting_id
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error saving greeting: {e}")
             return None
         finally:
@@ -448,9 +542,9 @@ class DatabaseManager:
             cursor.execute(
                 """
                 INSERT INTO greeting_reactions (greeting_id, user_id, username, reaction_emoji, reaction_date, reaction_time, server_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                reaction_time = VALUES(reaction_time)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (greeting_id, user_id, reaction_emoji) DO UPDATE SET
+                reaction_time = EXCLUDED.reaction_time
             """,
                 (greeting_id, user_id, username, reaction_emoji, date, time, server_id),
             )
@@ -460,7 +554,7 @@ class DatabaseManager:
                 f"Saved reaction {reaction_emoji} from {username} ({user_id}) to greeting {greeting_id}"
             )
             return True
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error saving greeting reaction: {e}")
             return False
         finally:
@@ -475,7 +569,7 @@ class DatabaseManager:
             cursor.execute(
                 """
                 DELETE FROM greeting_reactions
-                WHERE greeting_id = ? AND user_id = ? AND reaction_emoji = ?
+                WHERE greeting_id = %s AND user_id = %s AND reaction_emoji = %s
             """,
                 (greeting_id, user_id, reaction_emoji),
             )
@@ -485,7 +579,7 @@ class DatabaseManager:
                 f"Removed reaction {reaction_emoji} from user {user_id} to greeting {greeting_id}"
             )
             return True
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error removing greeting reaction: {e}")
             return False
         finally:
@@ -501,7 +595,7 @@ class DatabaseManager:
                 cursor.execute(
                     """
                     SELECT id FROM greetings
-                    WHERE message_id = ? AND server_id = ?
+                    WHERE message_id = %s AND server_id = %s
                     ORDER BY created_at DESC LIMIT 1
                 """,
                     (message_id, server_id),
@@ -510,7 +604,7 @@ class DatabaseManager:
                 cursor.execute(
                     """
                     SELECT id FROM greetings
-                    WHERE message_id = ?
+                    WHERE message_id = %s
                     ORDER BY created_at DESC LIMIT 1
                 """,
                     (message_id,),
@@ -518,7 +612,7 @@ class DatabaseManager:
 
             result = cursor.fetchone()
             return result[0] if result else None
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error getting greeting ID: {e}")
             return None
         finally:
@@ -551,8 +645,14 @@ class DatabaseManager:
             connection.autocommit = False
             cursor = connection.cursor()
 
+            # Serialize against decide_winner_atomically on the same game_date
+            # (replaces the MariaDB winner-row gap lock — see _game_lock_key).
             cursor.execute(
-                "SELECT 1 FROM game_1337_winners WHERE game_date = ? FOR UPDATE",
+                "SELECT pg_advisory_xact_lock(%s)", (_game_lock_key(game_date),)
+            )
+
+            cursor.execute(
+                "SELECT 1 FROM game_1337_winners WHERE game_date = %s",
                 (game_date,),
             )
             if cursor.fetchone() is not None:
@@ -566,11 +666,11 @@ class DatabaseManager:
             cursor.execute(
                 """
                 INSERT INTO game_1337_bets (user_id, username, play_time, game_date, bet_type, server_id, channel_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                play_time = VALUES(play_time),
-                bet_type = VALUES(bet_type),
-                username = VALUES(username)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id, game_date) DO UPDATE SET
+                play_time = EXCLUDED.play_time,
+                bet_type = EXCLUDED.bet_type,
+                username = EXCLUDED.username
             """,
                 (
                     user_id,
@@ -588,11 +688,11 @@ class DatabaseManager:
                 f"Saved 1337 bet for user {username} ({user_id}) on {game_date}"
             )
             return "saved"
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             if connection:
                 try:
                     connection.rollback()
-                except mariadb.Error:
+                except psycopg.Error:
                     pass
             logger.error(f"Error saving 1337 bet: {e}")
             return "error"
@@ -609,7 +709,7 @@ class DatabaseManager:
                 """
                 SELECT user_id, username, play_time, bet_type
                 FROM game_1337_bets
-                WHERE user_id = ? AND game_date = ?
+                WHERE user_id = %s AND game_date = %s
             """,
                 (user_id, game_date),
             )
@@ -623,7 +723,7 @@ class DatabaseManager:
                     "bet_type": result[3],
                 }
             return None
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching user bet: {e}")
             return None
         finally:
@@ -639,7 +739,7 @@ class DatabaseManager:
                 """
                 SELECT user_id, username, play_time, bet_type, server_id, channel_id
                 FROM game_1337_bets
-                WHERE game_date = ?
+                WHERE game_date = %s
                 ORDER BY play_time ASC
             """,
                 (game_date,),
@@ -657,7 +757,7 @@ class DatabaseManager:
                 }
                 for row in results
             ]
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching daily bets: {e}")
             return []
         finally:
@@ -682,14 +782,14 @@ class DatabaseManager:
             cursor.execute(
                 """
                 INSERT INTO game_1337_winners (user_id, username, game_date, win_time, play_time, bet_type, millisecond_diff, server_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                user_id = VALUES(user_id),
-                username = VALUES(username),
-                win_time = VALUES(win_time),
-                play_time = VALUES(play_time),
-                bet_type = VALUES(bet_type),
-                millisecond_diff = VALUES(millisecond_diff)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (game_date) DO UPDATE SET
+                user_id = EXCLUDED.user_id,
+                username = EXCLUDED.username,
+                win_time = EXCLUDED.win_time,
+                play_time = EXCLUDED.play_time,
+                bet_type = EXCLUDED.bet_type,
+                millisecond_diff = EXCLUDED.millisecond_diff
             """,
                 (
                     user_id,
@@ -708,7 +808,7 @@ class DatabaseManager:
                 f"Saved 1337 winner for user {username} ({user_id}) on {game_date}"
             )
             return True
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error saving 1337 winner: {e}")
             return False
         finally:
@@ -740,8 +840,15 @@ class DatabaseManager:
             connection.autocommit = False
             cursor = connection.cursor()
 
+            # Hold the per-game_date advisory lock across reading bets and
+            # inserting the winner, so no bet can land in between (save_1337_bet
+            # takes the same lock). Replaces the MariaDB gap lock.
             cursor.execute(
-                "SELECT 1 FROM game_1337_winners WHERE game_date = ? FOR UPDATE",
+                "SELECT pg_advisory_xact_lock(%s)", (_game_lock_key(game_date),)
+            )
+
+            cursor.execute(
+                "SELECT 1 FROM game_1337_winners WHERE game_date = %s",
                 (game_date,),
             )
             if cursor.fetchone() is not None:
@@ -757,7 +864,7 @@ class DatabaseManager:
                 """
                 SELECT user_id, username, play_time, bet_type, server_id, channel_id
                 FROM game_1337_bets
-                WHERE game_date = ?
+                WHERE game_date = %s
                 ORDER BY play_time ASC
             """,
                 (game_date,),
@@ -785,7 +892,7 @@ class DatabaseManager:
                 INSERT INTO game_1337_winners
                     (user_id, username, game_date, win_time, play_time,
                      bet_type, millisecond_diff, server_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
                 (
                     picked["user_id"],
@@ -805,11 +912,11 @@ class DatabaseManager:
             )
             return picked
 
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             if connection:
                 try:
                     connection.rollback()
-                except mariadb.Error:
+                except psycopg.Error:
                     pass
             logger.error(f"Error in decide_winner_atomically: {e}")
             raise
@@ -828,7 +935,7 @@ class DatabaseManager:
                     """
                     SELECT COUNT(*) as wins
                     FROM game_1337_winners
-                    WHERE user_id = ? AND game_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    WHERE user_id = %s AND game_date >= CURRENT_DATE - make_interval(days => %s)
                 """,
                     (user_id, days),
                 )
@@ -837,7 +944,7 @@ class DatabaseManager:
                     """
                     SELECT COUNT(*) as wins
                     FROM game_1337_winners
-                    WHERE user_id = ?
+                    WHERE user_id = %s
                 """,
                     (user_id,),
                 )
@@ -851,7 +958,7 @@ class DatabaseManager:
                            COUNT(*) as wins,
                            MAX(w.game_date) as last_win
                     FROM game_1337_winners w
-                    WHERE w.game_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    WHERE w.game_date >= CURRENT_DATE - make_interval(days => %s)
                     GROUP BY w.user_id
                     ORDER BY wins DESC, last_win DESC
                 """,
@@ -884,7 +991,7 @@ class DatabaseManager:
                     }
                     for row in results
                 ]
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching winner stats: {e}")
             return 0 if user_id else []
         finally:
@@ -900,7 +1007,7 @@ class DatabaseManager:
                 """
                 SELECT user_id, username, win_time, play_time, bet_type, millisecond_diff
                 FROM game_1337_winners
-                WHERE game_date = ?
+                WHERE game_date = %s
             """,
                 (game_date,),
             )
@@ -916,7 +1023,7 @@ class DatabaseManager:
                     "millisecond_diff": result[5],
                 }
             return None
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching daily winner: {e}")
             return None
         finally:
@@ -932,10 +1039,10 @@ class DatabaseManager:
             cursor.execute(
                 """
                 INSERT INTO game_1337_roles (guild_id, user_id, role_type, role_id)
-                VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                user_id = VALUES(user_id),
-                role_id = VALUES(role_id),
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (guild_id, role_type) DO UPDATE SET
+                user_id = EXCLUDED.user_id,
+                role_id = EXCLUDED.role_id,
                 updated_at = CURRENT_TIMESTAMP
             """,
                 (guild_id, user_id, role_type, role_id),
@@ -946,7 +1053,7 @@ class DatabaseManager:
                 f"Set {role_type} role assignment for user {user_id} in guild {guild_id}"
             )
             return True
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error setting role assignment: {e}")
             return False
         finally:
@@ -963,7 +1070,7 @@ class DatabaseManager:
                 """
                 SELECT user_id, role_id
                 FROM game_1337_roles
-                WHERE guild_id = ? AND role_type = ?
+                WHERE guild_id = %s AND role_type = %s
             """,
                 (guild_id, role_type),
             )
@@ -972,7 +1079,7 @@ class DatabaseManager:
             if result:
                 return {"user_id": result[0], "role_id": result[1]}
             return None
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching role assignment: {e}")
             return None
         finally:
@@ -989,7 +1096,7 @@ class DatabaseManager:
                 """
                 SELECT user_id, role_type, role_id
                 FROM game_1337_roles
-                WHERE guild_id = ?
+                WHERE guild_id = %s
             """,
                 (guild_id,),
             )
@@ -999,7 +1106,7 @@ class DatabaseManager:
                 {"user_id": row[0], "role_type": row[1], "role_id": row[2]}
                 for row in results
             ]
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching all role assignments: {e}")
             return []
         finally:
@@ -1015,7 +1122,7 @@ class DatabaseManager:
             cursor.execute(
                 """
                 DELETE FROM game_1337_roles
-                WHERE guild_id = ? AND role_type = ?
+                WHERE guild_id = %s AND role_type = %s
             """,
                 (guild_id, role_type),
             )
@@ -1023,7 +1130,7 @@ class DatabaseManager:
             connection.commit()
             logger.info(f"Removed {role_type} role assignment in guild {guild_id}")
             return True
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error removing role assignment: {e}")
             return False
         finally:
@@ -1039,9 +1146,9 @@ class DatabaseManager:
             cursor.execute(
                 """
                 INSERT INTO klugscheisser_user_preferences (user_id, opted_in)
-                VALUES (?, ?)
-                ON DUPLICATE KEY UPDATE
-                opted_in = VALUES(opted_in),
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                opted_in = EXCLUDED.opted_in,
                 updated_at = CURRENT_TIMESTAMP
             """,
                 (user_id, opted_in),
@@ -1051,7 +1158,7 @@ class DatabaseManager:
             status = "opted in" if opted_in else "opted out"
             logger.info(f"User {user_id} {status} of klugscheißer feature")
             return True
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error setting klugscheißer preference: {e}")
             return False
         finally:
@@ -1068,7 +1175,7 @@ class DatabaseManager:
                 """
                 SELECT opted_in, created_at
                 FROM klugscheisser_user_preferences
-                WHERE user_id = ?
+                WHERE user_id = %s
             """,
                 (user_id,),
             )
@@ -1077,7 +1184,7 @@ class DatabaseManager:
             if result:
                 return {"opted_in": bool(result[0]), "created_at": result[1]}
             return {"opted_in": False, "created_at": None}
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching klugscheißer preference: {e}")
             return {"opted_in": False, "created_at": None}
         finally:
@@ -1098,7 +1205,7 @@ class DatabaseManager:
 
             result = cursor.fetchone()
             return result[0] if result else 0
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching opted in users count: {e}")
             return 0
         finally:
@@ -1120,14 +1227,14 @@ class DatabaseManager:
                 cursor.execute(
                     """
                     INSERT INTO tldr_optins (guild_id, user_id)
-                    VALUES (?, ?)
-                    ON DUPLICATE KEY UPDATE user_id = user_id
+                    VALUES (%s, %s)
+                    ON CONFLICT (guild_id, user_id) DO NOTHING
                 """,
                     (guild_id, user_id),
                 )
             else:
                 cursor.execute(
-                    "DELETE FROM tldr_optins WHERE guild_id = ? AND user_id = ?",
+                    "DELETE FROM tldr_optins WHERE guild_id = %s AND user_id = %s",
                     (guild_id, user_id),
                 )
 
@@ -1137,7 +1244,7 @@ class DatabaseManager:
                 f"User {user_id} {status} /tldr summarization in guild {guild_id}"
             )
             return True
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error setting tldr opt-in: {e}")
             return False
         finally:
@@ -1151,11 +1258,11 @@ class DatabaseManager:
             connection = self._get_connection()
             cursor = connection.cursor()
             cursor.execute(
-                "SELECT user_id FROM tldr_optins WHERE guild_id = ?",
+                "SELECT user_id FROM tldr_optins WHERE guild_id = %s",
                 (guild_id,),
             )
             return {row[0] for row in cursor.fetchall()}
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching tldr opt-in list: {e}")
             return set()
         finally:
@@ -1190,7 +1297,8 @@ class DatabaseManager:
                     target_user_id, target_username, message_content, request_date,
                     score, factcheck_response, is_factcheckable, server_id, channel_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
             """,
                 (
                     requester_user_id,
@@ -1208,13 +1316,13 @@ class DatabaseManager:
                 ),
             )
 
-            factcheck_id = cursor.lastrowid
+            factcheck_id = cursor.fetchone()[0]
             connection.commit()
             logger.info(
                 f"Saved factcheck request from {requester_username} ({requester_user_id}) with ID {factcheck_id}, factcheckable: {is_factcheckable}"
             )
             return factcheck_id
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error saving factcheck request: {e}")
             return None
         finally:
@@ -1234,14 +1342,14 @@ class DatabaseManager:
                 """
                 SELECT COUNT(*)
                 FROM factcheck_requests
-                WHERE requester_user_id = ? AND request_date = ?
+                WHERE requester_user_id = %s AND request_date = %s
             """,
                 (user_id, date),
             )
 
             result = cursor.fetchone()
             return result[0] if result else 0
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching daily factcheck count: {e}")
             return 0
         finally:
@@ -1257,8 +1365,8 @@ class DatabaseManager:
             cursor.execute(
                 """
                 UPDATE factcheck_requests
-                SET score = ?, factcheck_response = ?
-                WHERE id = ?
+                SET score = %s, factcheck_response = %s
+                WHERE id = %s
             """,
                 (score, factcheck_response, factcheck_id),
             )
@@ -1266,7 +1374,7 @@ class DatabaseManager:
             connection.commit()
             logger.info(f"Updated factcheck request {factcheck_id} with score {score}")
             return True
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error updating factcheck result: {e}")
             return False
         finally:
@@ -1288,8 +1396,8 @@ class DatabaseManager:
                            MIN(score) as min_score,
                            MAX(score) as max_score
                     FROM factcheck_requests
-                    WHERE requester_user_id = ?
-                      AND request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    WHERE requester_user_id = %s
+                      AND request_date >= CURRENT_DATE - make_interval(days => %s)
                       AND score IS NOT NULL
                 """,
                     (user_id, days),
@@ -1313,7 +1421,7 @@ class DatabaseManager:
                            COUNT(*) as total_requests,
                            AVG(f.score) as avg_score
                     FROM factcheck_requests f
-                    WHERE f.request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    WHERE f.request_date >= CURRENT_DATE - make_interval(days => %s)
                       AND f.score IS NOT NULL
                     GROUP BY f.requester_user_id
                     ORDER BY total_requests DESC
@@ -1333,7 +1441,7 @@ class DatabaseManager:
                 ]
 
             return {} if user_id else []
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching factcheck statistics: {e}")
             return {} if user_id else []
         finally:
@@ -1380,26 +1488,26 @@ class DatabaseManager:
                     -- Lower accuracy percentage = higher on bullshit board
                     CASE
                         WHEN COUNT(target_checks.id) > 0 THEN
-                            COALESCE(AVG(target_checks.score), 0) * LOG(COUNT(target_checks.id) + 1)
+                            COALESCE(AVG(target_checks.score), 0) * LN(COUNT(target_checks.id) + 1)
                         ELSE 0
                     END as weighted_score
                 FROM klugscheisser_user_preferences u
                 LEFT JOIN (
-                    -- Get latest username for each user
-                    SELECT
+                    -- Latest username per user: DISTINCT ON keeps the row with
+                    -- the most recent created_at for each target_user_id.
+                    SELECT DISTINCT ON (target_user_id)
                         target_user_id,
                         target_username as username
                     FROM factcheck_requests
-                    WHERE request_date >= DATE_SUB(CURDATE(), INTERVAL {days} DAY)
-                    GROUP BY target_user_id
-                    ORDER BY MAX(created_at) DESC
+                    WHERE request_date >= CURRENT_DATE - make_interval(days => {days})
+                    ORDER BY target_user_id, created_at DESC
                 ) latest_username ON u.user_id = latest_username.target_user_id
                 LEFT JOIN factcheck_requests target_checks
                     ON u.user_id = target_checks.target_user_id
                     AND target_checks.requester_user_id != target_checks.target_user_id  -- EXCLUDE self-checks!
                     AND target_checks.score IS NOT NULL
                     AND target_checks.is_factcheckable = TRUE  -- ONLY factcheckable messages count toward score!
-                    AND target_checks.request_date >= DATE_SUB(CURDATE(), INTERVAL {days} DAY)
+                    AND target_checks.request_date >= CURRENT_DATE - make_interval(days => {days})
                 LEFT JOIN (
                     -- Self-checks separately
                     SELECT
@@ -1407,7 +1515,7 @@ class DatabaseManager:
                         COUNT(*) as self_check_count
                     FROM factcheck_requests
                     WHERE requester_user_id = target_user_id  -- Self-check
-                        AND request_date >= DATE_SUB(CURDATE(), INTERVAL {days} DAY)
+                        AND request_date >= CURRENT_DATE - make_interval(days => {days})
                     GROUP BY target_user_id
                 ) self_checks ON u.user_id = self_checks.target_user_id
                 LEFT JOIN (
@@ -1416,7 +1524,7 @@ class DatabaseManager:
                         requester_user_id,
                         COUNT(*) as total_requests
                     FROM factcheck_requests
-                    WHERE request_date >= DATE_SUB(CURDATE(), INTERVAL {days} DAY)
+                    WHERE request_date >= CURRENT_DATE - make_interval(days => {days})
                     GROUP BY requester_user_id
                 ) requester_stats ON u.user_id = requester_stats.requester_user_id
                 WHERE u.opted_in = TRUE
@@ -1443,7 +1551,7 @@ class DatabaseManager:
                 }
                 for row in results
             ]
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching bullshit board data: {e}")
             return []
         finally:
@@ -1465,7 +1573,7 @@ class DatabaseManager:
                     ON u.user_id = target_checks.target_user_id
                     AND target_checks.requester_user_id != target_checks.target_user_id  -- EXCLUDE self-checks!
                     AND target_checks.score IS NOT NULL
-                    AND target_checks.request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    AND target_checks.request_date >= CURRENT_DATE - make_interval(days => %s)
                 WHERE u.opted_in = TRUE
                 GROUP BY u.user_id
                 HAVING COUNT(target_checks.id) >= 1  -- Min. 1x checked by OTHERS
@@ -1475,7 +1583,7 @@ class DatabaseManager:
 
             result = cursor.fetchone()
             return result[0] if result else 0
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching bullshit board count: {e}")
             return 0
         finally:
@@ -1501,15 +1609,15 @@ class DatabaseManager:
                     AVG(CASE WHEN fcr.requester_user_id = fcr.target_user_id THEN fcr.score END) as score_from_self,
                     -- Requests made
                     (SELECT COUNT(*) FROM factcheck_requests
-                     WHERE requester_user_id = ?
-                       AND request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)) as total_requests,
+                     WHERE requester_user_id = %s
+                       AND request_date >= CURRENT_DATE - make_interval(days => %s)) as total_requests,
                     -- Unique checkers
                     COUNT(DISTINCT CASE WHEN fcr.requester_user_id != fcr.target_user_id
                                        THEN fcr.requester_user_id END) as unique_checkers
                 FROM factcheck_requests fcr
-                WHERE fcr.target_user_id = ?
+                WHERE fcr.target_user_id = %s
                   AND fcr.score IS NOT NULL
-                  AND fcr.request_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                  AND fcr.request_date >= CURRENT_DATE - make_interval(days => %s)
             """,
                 (user_id, days, user_id, days),
             )
@@ -1536,7 +1644,7 @@ class DatabaseManager:
                     else "CLEAN",
                 }
             return {}
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching user factcheck breakdown: {e}")
             return {}
         finally:
@@ -1559,7 +1667,7 @@ class DatabaseManager:
             cursor.execute(
                 """
                 SELECT ai_response, score, hit_count FROM ai_response_cache
-                WHERE message_content_hash = ? AND response_type = ?
+                WHERE message_content_hash = %s AND response_type = %s
                 LIMIT 1
             """,
                 (content_hash, response_type),
@@ -1571,7 +1679,7 @@ class DatabaseManager:
                     """
                     UPDATE ai_response_cache
                     SET hit_count = hit_count + 1, last_used = CURRENT_TIMESTAMP
-                    WHERE message_content_hash = ? AND response_type = ?
+                    WHERE message_content_hash = %s AND response_type = %s
                 """,
                     (content_hash, response_type),
                 )
@@ -1603,11 +1711,11 @@ class DatabaseManager:
             cursor.execute(
                 """
                 INSERT INTO ai_response_cache (message_content_hash, message_content, response_type, ai_response, score, hit_count)
-                VALUES (?, ?, ?, ?, ?, 1)
-                ON DUPLICATE KEY UPDATE
-                    ai_response = VALUES(ai_response),
-                    score = VALUES(score),
-                    hit_count = hit_count + 1,
+                VALUES (%s, %s, %s, %s, %s, 1)
+                ON CONFLICT (message_content_hash, response_type) DO UPDATE SET
+                    ai_response = EXCLUDED.ai_response,
+                    score = EXCLUDED.score,
+                    hit_count = ai_response_cache.hit_count + 1,
                     last_used = CURRENT_TIMESTAMP
             """,
                 (content_hash, message_content, response_type, ai_response, score),
@@ -1635,7 +1743,7 @@ class DatabaseManager:
                        last_success_at, last_error, initial_sync_completed,
                        lease_owner, lease_until
                 FROM postillon_feed_state
-                WHERE feed_key = ?
+                WHERE feed_key = %s
                 """,
                 (feed_key,),
             )
@@ -1664,29 +1772,30 @@ class DatabaseManager:
             connection = self._get_connection()
             cursor = connection.cursor()
             cursor.execute(
-                "INSERT IGNORE INTO postillon_feed_state (feed_key) VALUES (?)",
+                "INSERT INTO postillon_feed_state (feed_key) VALUES (%s) "
+                "ON CONFLICT (feed_key) DO NOTHING",
                 (feed_key,),
             )
             cursor.execute(
                 """
                 UPDATE postillon_feed_state
-                SET lease_owner = ?,
-                    lease_until = DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? SECOND)
-                WHERE feed_key = ?
-                  AND (lease_until IS NULL OR lease_until < UTC_TIMESTAMP()
-                       OR lease_owner = ?)
+                SET lease_owner = %s,
+                    lease_until = ((now() AT TIME ZONE 'utc') + make_interval(secs => %s))
+                WHERE feed_key = %s
+                  AND (lease_until IS NULL OR lease_until < (now() AT TIME ZONE 'utc')
+                       OR lease_owner = %s)
                 """,
                 (owner, lease_seconds, feed_key, owner),
             )
             cursor.execute(
-                "SELECT lease_owner FROM postillon_feed_state WHERE feed_key = ?",
+                "SELECT lease_owner FROM postillon_feed_state WHERE feed_key = %s",
                 (feed_key,),
             )
             row = cursor.fetchone()
             acquired = bool(row and row[0] == owner)
             connection.commit()
             return acquired
-        except mariadb.Error:
+        except psycopg.Error:
             if connection:
                 connection.rollback()
             raise
@@ -1703,7 +1812,7 @@ class DatabaseManager:
                 """
                 UPDATE postillon_feed_state
                 SET lease_owner = NULL, lease_until = NULL
-                WHERE feed_key = ? AND lease_owner = ?
+                WHERE feed_key = %s AND lease_owner = %s
                 """,
                 (feed_key, owner),
             )
@@ -1722,10 +1831,10 @@ class DatabaseManager:
                 """
                 INSERT INTO postillon_feed_state
                     (feed_key, last_attempt_at, last_error)
-                VALUES (?, UTC_TIMESTAMP(), ?)
-                ON DUPLICATE KEY UPDATE
-                    last_attempt_at = UTC_TIMESTAMP(),
-                    last_error = VALUES(last_error)
+                VALUES (%s, (now() AT TIME ZONE 'utc'), %s)
+                ON CONFLICT (feed_key) DO UPDATE SET
+                    last_attempt_at = (now() AT TIME ZONE 'utc'),
+                    last_error = EXCLUDED.last_error
                 """,
                 (feed_key, error),
             )
@@ -1743,12 +1852,12 @@ class DatabaseManager:
             cursor.execute(
                 """
                 UPDATE postillon_feed_state
-                SET etag = COALESCE(?, etag),
-                    last_modified = COALESCE(?, last_modified),
-                    last_attempt_at = UTC_TIMESTAMP(),
-                    last_success_at = UTC_TIMESTAMP(),
+                SET etag = COALESCE(%s, etag),
+                    last_modified = COALESCE(%s, last_modified),
+                    last_attempt_at = (now() AT TIME ZONE 'utc'),
+                    last_success_at = (now() AT TIME ZONE 'utc'),
                     last_error = NULL
-                WHERE feed_key = ?
+                WHERE feed_key = %s
                 """,
                 (etag, last_modified, feed_key),
             )
@@ -1774,7 +1883,7 @@ class DatabaseManager:
             cursor = connection.cursor()
             cursor.execute(
                 "SELECT initial_sync_completed FROM postillon_feed_state "
-                "WHERE feed_key = ? FOR UPDATE",
+                "WHERE feed_key = %s FOR UPDATE",
                 (feed_key,),
             )
             state = cursor.fetchone()
@@ -1788,7 +1897,7 @@ class DatabaseManager:
                     """
                     SELECT id, content_hash
                     FROM postillon_posts
-                    WHERE identity_hash = ?
+                    WHERE identity_hash = %s
                     LIMIT 1 FOR UPDATE
                     """,
                     (post.identity_hash,),
@@ -1798,7 +1907,7 @@ class DatabaseManager:
                     """
                     SELECT id, content_hash
                     FROM postillon_posts
-                    WHERE url_hash = ?
+                    WHERE url_hash = %s
                     LIMIT 1 FOR UPDATE
                     """,
                     (post.url_hash,),
@@ -1830,11 +1939,11 @@ class DatabaseManager:
                     cursor.execute(
                         """
                         UPDATE postillon_posts
-                        SET identity_hash = ?, url_hash = ?, external_id = ?,
-                            title = ?, url = ?, author = ?, summary_text = ?,
-                            image_url = ?, categories_json = ?, published_at = ?,
-                            source_updated_at = ?, content_hash = ?
-                        WHERE id = ?
+                        SET identity_hash = %s, url_hash = %s, external_id = %s,
+                            title = %s, url = %s, author = %s, summary_text = %s,
+                            image_url = %s, categories_json = %s, published_at = %s,
+                            source_updated_at = %s, content_hash = %s
+                        WHERE id = %s
                         """,
                         (*values, post_id),
                     )
@@ -1848,18 +1957,19 @@ class DatabaseManager:
                         (identity_hash, url_hash, external_id, title, url, author,
                          summary_text, image_url, categories_json, published_at,
                          source_updated_at, content_hash)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
                     """,
                     values,
                 )
-                post_id = cursor.lastrowid
+                post_id = cursor.fetchone()[0]
                 inserted += 1
                 if initial_sync_completed or announce_first_sync:
                     cursor.execute(
                         """
                         INSERT INTO postillon_deliveries (post_id, channel_id)
-                        VALUES (?, ?)
-                        ON DUPLICATE KEY UPDATE post_id = post_id
+                        VALUES (%s, %s)
+                        ON CONFLICT (post_id, channel_id) DO NOTHING
                         """,
                         (post_id, channel_id),
                     )
@@ -1869,11 +1979,11 @@ class DatabaseManager:
             cursor.execute(
                 """
                 UPDATE postillon_feed_state
-                SET etag = ?, last_modified = ?,
-                    last_attempt_at = UTC_TIMESTAMP(),
-                    last_success_at = UTC_TIMESTAMP(), last_error = NULL,
+                SET etag = %s, last_modified = %s,
+                    last_attempt_at = (now() AT TIME ZONE 'utc'),
+                    last_success_at = (now() AT TIME ZONE 'utc'), last_error = NULL,
                     initial_sync_completed = TRUE
-                WHERE feed_key = ?
+                WHERE feed_key = %s
                 """,
                 (etag, last_modified, feed_key),
             )
@@ -1900,22 +2010,22 @@ class DatabaseManager:
                        p.published_at, p.source_updated_at
                 FROM postillon_deliveries d
                 JOIN postillon_posts p ON p.id = d.post_id
-                WHERE d.channel_id = ?
+                WHERE d.channel_id = %s
                   AND (d.status = 'pending'
                        OR (d.status = 'sending' AND d.claimed_at <
-                           DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? SECOND)))
+                           ((now() AT TIME ZONE 'utc') - make_interval(secs => %s))))
                 ORDER BY COALESCE(p.published_at, p.first_seen_at) ASC, p.id ASC
-                LIMIT ? FOR UPDATE
+                LIMIT %s FOR UPDATE OF d
                 """,
                 (channel_id, stale_after_seconds, limit),
             )
             rows = cursor.fetchall()
             if rows:
-                placeholders = ",".join("?" for _ in rows)
+                placeholders = ",".join("%s" for _ in rows)
                 cursor.execute(
                     f"""
                     UPDATE postillon_deliveries
-                    SET status = 'sending', claimed_at = UTC_TIMESTAMP(),
+                    SET status = 'sending', claimed_at = (now() AT TIME ZONE 'utc'),
                         attempt_count = attempt_count + 1
                     WHERE id IN ({placeholders})
                     """,
@@ -1952,9 +2062,9 @@ class DatabaseManager:
             cursor.execute(
                 """
                 UPDATE postillon_deliveries
-                SET status = 'sent', discord_message_id = ?,
-                    delivered_at = UTC_TIMESTAMP(), last_error = NULL
-                WHERE id = ? AND status = 'sending'
+                SET status = 'sent', discord_message_id = %s,
+                    delivered_at = (now() AT TIME ZONE 'utc'), last_error = NULL
+                WHERE id = %s AND status = 'sending'
                 """,
                 (discord_message_id, delivery_id),
             )
@@ -1972,8 +2082,8 @@ class DatabaseManager:
             cursor.execute(
                 """
                 UPDATE postillon_deliveries
-                SET status = 'pending', claimed_at = NULL, last_error = ?
-                WHERE id = ? AND status = 'sending'
+                SET status = 'pending', claimed_at = NULL, last_error = %s
+                WHERE id = %s AND status = 'sending'
                 """,
                 (error[:65535], delivery_id),
             )
@@ -1994,7 +2104,7 @@ class DatabaseManager:
                        image_url, categories_json, published_at, source_updated_at
                 FROM postillon_posts
                 ORDER BY COALESCE(published_at, first_seen_at) DESC, id DESC
-                LIMIT ?
+                LIMIT %s
                 """,
                 (amount,),
             )
@@ -2025,7 +2135,7 @@ class DatabaseManager:
             cursor.execute(
                 """
                 SELECT status, COUNT(*) FROM postillon_deliveries
-                WHERE channel_id = ? GROUP BY status
+                WHERE channel_id = %s GROUP BY status
                 """,
                 (channel_id,),
             )
@@ -2044,17 +2154,17 @@ class DatabaseManager:
             cursor.execute(
                 """
                 INSERT INTO birthdays (user_id, username, birthday, server_id)
-                VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    username = VALUES(username),
-                    birthday = VALUES(birthday)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (user_id, server_id) DO UPDATE SET
+                    username = EXCLUDED.username,
+                    birthday = EXCLUDED.birthday
                 """,
                 (user_id, username, birthday, server_id),
             )
             connection.commit()
             logger.info(f"Set birthday for user {username} ({user_id}): {birthday}")
             return True
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error setting birthday: {e}")
             return False
         finally:
@@ -2084,7 +2194,9 @@ class DatabaseManager:
                 """
                 SELECT user_id, username, birthday, server_id
                 FROM birthdays
-                WHERE server_id = ? AND birthday_month = ? AND birthday_day = ?
+                WHERE server_id = %s
+                  AND EXTRACT(MONTH FROM birthday) = %s
+                  AND EXTRACT(DAY FROM birthday) = %s
                 """,
                 (server_id, today.month, today.day),
             )
@@ -2098,7 +2210,7 @@ class DatabaseManager:
                 }
                 for row in results
             ]
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error fetching today's birthdays: {e}")
             return []
         finally:
@@ -2119,14 +2231,15 @@ class DatabaseManager:
             cursor = connection.cursor()
             cursor.execute(
                 """
-                INSERT IGNORE INTO birthday_announcements (server_id, announce_date)
-                VALUES (?, ?)
+                INSERT INTO birthday_announcements (server_id, announce_date)
+                VALUES (%s, %s)
+                ON CONFLICT (server_id, announce_date) DO NOTHING
                 """,
                 (server_id, announce_date),
             )
             connection.commit()
             return cursor.rowcount > 0
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error claiming birthday announcement: {e}")
             return False
         finally:
@@ -2142,13 +2255,13 @@ class DatabaseManager:
             cursor.execute(
                 """
                 DELETE FROM birthday_announcements
-                WHERE server_id = ? AND announce_date = ?
+                WHERE server_id = %s AND announce_date = %s
                 """,
                 (server_id, announce_date),
             )
             connection.commit()
             return True
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error releasing birthday announcement claim: {e}")
             return False
         finally:
@@ -2167,7 +2280,7 @@ class DatabaseManager:
             connection = self._get_connection()
             cursor = connection.cursor()
             cursor.execute(
-                "DELETE FROM birthdays WHERE user_id = ? AND server_id = ?",
+                "DELETE FROM birthdays WHERE user_id = %s AND server_id = %s",
                 (user_id, server_id),
             )
             connection.commit()
@@ -2177,7 +2290,7 @@ class DatabaseManager:
                     f"Removed birthday for user {user_id} on server {server_id}"
                 )
             return deleted
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Error removing birthday: {e}")
             return None
         finally:

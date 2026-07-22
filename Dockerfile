@@ -8,11 +8,9 @@ ARG GIT_REVISION
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies for MariaDB connector
+# procps: `pgrep` for the liveness probe. The psycopg[binary] wheel bundles
+# libpq, so no PostgreSQL client libraries or a compiler are needed here.
 RUN apt-get update && apt-get install -y \
-    gcc \
-    default-libmysqlclient-dev \
-    pkg-config \
     procps \
     && rm -rf /var/lib/apt/lists/*
 

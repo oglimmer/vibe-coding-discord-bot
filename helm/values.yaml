@@ -89,7 +89,8 @@ podSecurityContext:
 
 env:
   TZ: "Europe/Berlin"
-  DB_HOST: "mariadb"
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
   DB_NAME: "vibe-bot"
   DB_USER: "vibe-bot"
   GAME_START_TIME: "13:37:00.000"

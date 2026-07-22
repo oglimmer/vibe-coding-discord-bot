@@ -4,7 +4,7 @@ Demo Data Creator for Discord Bot Database
 Creates realistic test data for bullshitboard testing
 """
 
-import mariadb
+import psycopg
 import random
 import hashlib
 from datetime import datetime, date, timedelta, time
@@ -18,15 +18,15 @@ class DemoDataCreator:
     def connect(self):
         """Connect to database"""
         try:
-            self.connection = mariadb.connect(
+            self.connection = psycopg.connect(
                 user=Config.DB_USER,
                 password=Config.DB_PASSWORD,
                 host=Config.DB_HOST,
                 port=Config.DB_PORT,
-                database=Config.DB_NAME,
+                dbname=Config.DB_NAME,
             )
             print("✅ Connected to database")
-        except mariadb.Error as e:
+        except psycopg.Error as e:
             print(f"❌ Error connecting to database: {e}")
             raise
 
@@ -80,7 +80,7 @@ class DemoDataCreator:
             cursor.execute(
                 """
                 INSERT INTO klugscheisser_user_preferences (user_id, opted_in)
-                VALUES (?, ?)
+                VALUES (%s, %s)
             """,
                 (user_id, opted_in),
             )
@@ -212,7 +212,7 @@ class DemoDataCreator:
                     target_user_id, target_username, message_content,
                     request_date, score, factcheck_response, is_factcheckable,
                     server_id, channel_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
                 (
                     requester_id,
@@ -254,7 +254,7 @@ class DemoDataCreator:
                     target_user_id, target_username, message_content,
                     request_date, score, factcheck_response, is_factcheckable,
                     server_id, channel_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
                 (
                     requester_id,
@@ -315,7 +315,7 @@ class DemoDataCreator:
                 INSERT INTO ai_response_cache (
                     message_content_hash, message_content, response_type,
                     ai_response, score, hit_count
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s)
             """,
                 (content_hash, content, response_type, ai_response, score, hit_count),
             )
@@ -359,7 +359,8 @@ class DemoDataCreator:
                 INSERT INTO greetings (
                     user_id, username, greeting_message, greeting_date,
                     greeting_time, server_id, channel_id, message_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
             """,
                 (
                     user_id,
@@ -373,7 +374,7 @@ class DemoDataCreator:
                 ),
             )
 
-            greeting_ids.append(cursor.lastrowid)
+            greeting_ids.append(cursor.fetchone()[0])
 
         # Add reactions to greetings
         reactions = ["👍", "❤️", "😊", "🌅", "☀️", "👋"]
@@ -394,7 +395,7 @@ class DemoDataCreator:
                         INSERT INTO greeting_reactions (
                             greeting_id, user_id, username, reaction_emoji,
                             reaction_date, reaction_time, server_id
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """,
                         (
                             greeting_id,
@@ -406,7 +407,7 @@ class DemoDataCreator:
                             987654321098765432,
                         ),
                     )
-                except mariadb.IntegrityError:
+                except psycopg.errors.UniqueViolation:
                     # Skip duplicate reactions (unique constraint)
                     pass
 
@@ -448,7 +449,7 @@ class DemoDataCreator:
                     INSERT INTO game_1337_bets (
                         user_id, username, play_time, game_date, bet_type,
                         server_id, channel_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                     (
                         user_id,
@@ -476,7 +477,7 @@ class DemoDataCreator:
                     INSERT INTO game_1337_winners (
                         user_id, username, game_date, win_time, play_time,
                         bet_type, millisecond_diff, server_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                     (
                         winner_id,

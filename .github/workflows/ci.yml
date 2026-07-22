@@ -76,11 +76,6 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libmariadb-dev mariadb-client
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

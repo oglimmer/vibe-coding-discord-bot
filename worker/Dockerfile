@@ -13,16 +13,13 @@ ARG CLAUDE_CODE_VERSION=latest
 
 # git: clone/push; curl+jq: GitHub REST API and log-marker JSON.
 # nodejs (NodeSource LTS): the Claude Code CLI runtime.
-# gcc/libmariadb/pkg-config: build this repo's mariadb driver when installing
-# its requirements at runtime.
+# This repo's PostgreSQL driver is psycopg[binary], whose wheel bundles libpq,
+# so no client libraries or compiler are needed to install its requirements.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     jq \
     ca-certificates \
-    gcc \
-    default-libmysqlclient-dev \
-    pkg-config \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
