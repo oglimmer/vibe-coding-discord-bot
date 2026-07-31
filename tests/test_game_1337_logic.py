@@ -737,11 +737,11 @@ class TestGame1337Logic(unittest.TestCase):
         self.assertEqual(assignments["general"], 456)
 
     def test_determine_new_role_assignments_general_tied_wins(self):
-        """Test General assignment - top two players have same wins, no General assigned"""
+        """Test General assignment - tie between two players, most recent win breaks it"""
         winner_today = {"user_id": 123, "username": "Winner"}
         current_roles = {"general": {"user_id": 999}, "commander": {}, "sergeant": {}}
 
-        # Both players have same number of wins
+        # Both players have same number of wins, neither is the current General
         top_365_players = [
             {"user_id": 456, "username": "Player1", "wins": 10},
             {"user_id": 789, "username": "Player2", "wins": 10},
@@ -755,8 +755,31 @@ class TestGame1337Logic(unittest.TestCase):
             winner_today, current_roles, 12345
         )
 
-        # No General should be assigned since top player doesn't have MORE wins
-        self.assertNotIn("general", assignments)
+        # The role stays filled: stats are ordered by most recent win, so the
+        # first tied player takes it rather than the role going vacant.
+        self.assertEqual(assignments["general"], 456)
+
+    def test_determine_new_role_assignments_general_tie_keeps_incumbent(self):
+        """Test General assignment - a tie must not unseat the current General"""
+        winner_today = {"user_id": 123, "username": "Winner"}
+        current_roles = {"general": {"user_id": 789}, "commander": {}, "sergeant": {}}
+
+        # Player 456 has caught up with the sitting General (789)
+        top_365_players = [
+            {"user_id": 456, "username": "Challenger", "wins": 10},
+            {"user_id": 789, "username": "CurrentGeneral", "wins": 10},
+        ]
+
+        self.logic.get_winner_stats = Mock(
+            side_effect=lambda days: top_365_players if days == 365 else []
+        )
+
+        assignments = self.logic.determine_new_role_assignments(
+            winner_today, current_roles, 12345
+        )
+
+        # Drawing level is not enough to take the role off the incumbent
+        self.assertEqual(assignments["general"], 789)
 
     def test_determine_new_role_assignments_general_single_player(self):
         """Test General assignment - only one player with wins"""
@@ -857,7 +880,7 @@ class TestGame1337Logic(unittest.TestCase):
         self.assertEqual(assignments["commander"], 789)
 
     def test_determine_new_role_assignments_commander_tied_14day_wins(self):
-        """Test Commander assignment - top 14-day players have tied wins"""
+        """Test Commander assignment - tie between two players, most recent win breaks it"""
         winner_today = {"user_id": 123, "username": "Winner"}
         current_roles = {
             "general": {"user_id": 456},
@@ -866,7 +889,7 @@ class TestGame1337Logic(unittest.TestCase):
         }
 
         top_365_players = [{"user_id": 456, "username": "General", "wins": 20}]
-        # Top two 14-day players have same wins
+        # Top two 14-day players have same wins, neither is the current Commander
         top_14_players = [
             {"user_id": 789, "username": "Player1", "wins": 8},
             {"user_id": 321, "username": "Player2", "wins": 8},
@@ -880,8 +903,73 @@ class TestGame1337Logic(unittest.TestCase):
             winner_today, current_roles, 12345
         )
 
-        # No Commander should be assigned since top player doesn't have MORE wins
-        self.assertNotIn("commander", assignments)
+        # The role stays filled: stats are ordered by most recent win, so the
+        # first tied player takes it rather than the role going vacant.
+        self.assertEqual(assignments["commander"], 789)
+
+    def test_determine_new_role_assignments_commander_tie_keeps_incumbent(self):
+        """Test Commander assignment - a tie must not unseat the current Commander"""
+        winner_today = {"user_id": 123, "username": "Winner"}
+        current_roles = {
+            "general": {"user_id": 456},
+            "commander": {"user_id": 321},
+            "sergeant": {},
+        }
+
+        top_365_players = [{"user_id": 456, "username": "General", "wins": 20}]
+        # Player 789 has caught up with the sitting Commander (321)
+        top_14_players = [
+            {"user_id": 789, "username": "Challenger", "wins": 8},
+            {"user_id": 321, "username": "CurrentCommander", "wins": 8},
+        ]
+
+        self.logic.get_winner_stats = Mock(
+            side_effect=lambda days: top_365_players if days == 365 else top_14_players
+        )
+
+        assignments = self.logic.determine_new_role_assignments(
+            winner_today, current_roles, 12345
+        )
+
+        # Drawing level is not enough to take the role off the incumbent
+        self.assertEqual(assignments["commander"], 321)
+
+    def test_determine_new_role_assignments_commander_tie_with_general_ignored(self):
+        """Test Commander assignment - the General cannot block the Commander role
+
+        This is the regression case: the top 14-day player was tied with the
+        General, who is ineligible for Commander anyway, and the old logic
+        stripped the role from the leader and gave it to nobody.
+        """
+        winner_today = {"user_id": 123, "username": "Winner"}
+        current_roles = {
+            "general": {"user_id": 456},
+            "commander": {"user_id": 789},
+            "sergeant": {},
+        }
+
+        top_365_players = [
+            {"user_id": 456, "username": "General", "wins": 83},
+            {"user_id": 789, "username": "Leader", "wins": 40},
+        ]
+        # Leader (789) is tied on 14-day wins with the General (456)
+        top_14_players = [
+            {"user_id": 789, "username": "Leader", "wins": 4},
+            {"user_id": 456, "username": "General", "wins": 4},
+            {"user_id": 321, "username": "ThirdPlace", "wins": 2},
+        ]
+
+        self.logic.get_winner_stats = Mock(
+            side_effect=lambda days: top_365_players if days == 365 else top_14_players
+        )
+
+        assignments = self.logic.determine_new_role_assignments(
+            winner_today, current_roles, 12345
+        )
+
+        self.assertEqual(assignments["general"], 456)
+        # 789 leads every eligible player and keeps Commander
+        self.assertEqual(assignments["commander"], 789)
 
     def test_determine_new_role_assignments_commander_single_14day_player(self):
         """Test Commander assignment - only one 14-day player"""

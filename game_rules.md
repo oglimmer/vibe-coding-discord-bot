@@ -76,7 +76,7 @@ The game includes a hierarchical role system based on winning performance:
 - **Privileges**: Recognition as daily champion
 
 #### 2. Commander Role
-- **Assignment**: Player with most wins in the last 14 days
+- **Assignment**: Player with most wins in the last 14 days, not counting the General
 - **Duration**: Until next 14-day period calculation
 - **Privileges**: Recognition as short-term champion
 
@@ -92,6 +92,10 @@ The game includes a hierarchical role system based on winning performance:
 - **Automatic Updates**: Roles are automatically assigned/removed after each game
 - **Single Assignment**: Only one player can hold each role at a time
 - **Priority**: General > Commander > Sergeant (higher roles take precedence)
+- **Ties**: A draw on wins never empties a role. If the current holder is among
+  the tied players they keep it; otherwise the most recent win breaks the tie.
+  Because the General is excluded from the Commander ranking, being level with
+  the General does not cost anyone the Commander role.
 
 ## Game Commands
 

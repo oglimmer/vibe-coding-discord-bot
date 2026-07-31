@@ -7,15 +7,17 @@ Game 1337 implements a hierarchical role system with three tiers: Sergeant, Comm
 ## Role Assignment Rules
 
 ### 1. General Role
-- **Assignment**: Choose the player who has won more games in the past 365 days than any other player
-- **Eligibility**: Must NOT already be the General
+- **Assignment**: Choose the player who has won the most games in the past 365 days
+- **Eligibility**: Every player with at least one win in the window
 - **Duration**: Updated daily based on 365-day rolling statistics
 - **Priority**: Highest tier role
 
 ### 2. Commander Role
 - **Assignment**: Choose the player who has won the most games in the past 14 days
-- **Eligibility**: Must NOT be the General or already the Commander
-- **Special Case**: If the General also has the most wins in the past 14 days, then pick the second-most winning player in the last 14 days as Commander (as long as they have more wins than everyone else besides the General and are not already the Commander)
+- **Eligibility**: Must NOT be the General. The General is removed from the
+  ranking before the winner is picked, so if the General also leads the 14-day
+  stats the role simply goes to the best remaining player — and a player who is
+  merely *level* with the General still gets it.
 - **Duration**: Updated daily based on 14-day rolling statistics
 - **Priority**: Mid-tier role
 
@@ -24,6 +26,19 @@ Game 1337 implements a hierarchical role system with three tiers: Sergeant, Comm
 - **Eligibility**: Must NOT be the General or the Commander
 - **Duration**: Until the next daily winner is determined
 - **Priority**: Lowest tier role
+
+### Tie-Breaking
+
+General and Commander are decided on win counts, which frequently tie. A tie
+never leaves the role vacant:
+
+1. If the **current holder** is among the tied players, they keep the role. You
+   do not lose a rank because somebody drew level with you.
+2. Otherwise the **most recent win** breaks the tie (`get_winner_stats()` orders
+   by `wins DESC, last_win DESC`, so this is the first tied entry).
+
+A role is only removed without a replacement when no eligible player has a win
+in the window at all.
 
 ## Role Assignment Algorithm
 
@@ -39,56 +54,65 @@ def determine_new_role_assignments(self, winner_today: Dict[str, Any],
     top_365_players = self.get_winner_stats(days=365)
     top_14_players = self.get_winner_stats(days=14)
 
-    # 1. General: Top 365-day player who is not already General
-    if top_365_players:
-        current_general_id = current_roles.get('general', {}).get('user_id')
-        for player in top_365_players:
-            if player['user_id'] != current_general_id:
-                assignments['general'] = player['user_id']
-                break
+    current_general_id = (current_roles.get('general') or {}).get('user_id')
+    current_commander_id = (current_roles.get('commander') or {}).get('user_id')
 
-    # 2. Commander: Top 14-day player who is not General or already Commander
-    if top_14_players:
-        general_id = assignments.get('general') or current_roles.get('general', {}).get('user_id')
-        current_commander_id = current_roles.get('commander', {}).get('user_id')
+    # 1. General: Player with the most wins in the past 365 days
+    general = self._select_role_holder(top_365_players, current_general_id)
+    if general:
+        assignments['general'] = general['user_id']
 
-        # Find the best candidate for Commander
-        commander_candidate = None
-        for player in top_14_players:
-            if player['user_id'] != general_id and player['user_id'] != current_commander_id:
-                commander_candidate = player
-                break
-
-        # Special case: If General also has most 14-day wins, pick second place
-        if (top_14_players and general_id and
-            top_14_players[0]['user_id'] == general_id and
-            len(top_14_players) > 1):
-            # Pick second place as Commander if they're not already Commander
-            second_place = top_14_players[1]
-            if second_place['user_id'] != current_commander_id:
-                commander_candidate = second_place
-
-        if commander_candidate:
-            assignments['commander'] = commander_candidate['user_id']
+    # 2. Commander: Player with the most wins in the past 14 days, General aside
+    general_id = assignments.get('general') or current_general_id
+    commander = self._select_role_holder(
+        top_14_players,
+        current_commander_id,
+        excluded_user_ids={general_id} if general_id else None,
+    )
+    if commander:
+        assignments['commander'] = commander['user_id']
 
     # 3. Sergeant: Today's winner who is not General or Commander
-    general_id = assignments.get('general') or current_roles.get('general', {}).get('user_id')
-    commander_id = assignments.get('commander') or current_roles.get('commander', {}).get('user_id')
+    new_general_id = assignments.get('general')
+    new_commander_id = assignments.get('commander')
 
-    if (winner_today['user_id'] != general_id and
-        winner_today['user_id'] != commander_id):
+    if (winner_today['user_id'] != new_general_id
+            and winner_today['user_id'] != new_commander_id):
         assignments['sergeant'] = winner_today['user_id']
 
     return assignments
+```
+
+Both ranked roles go through the same helper, `_select_role_holder()`, which
+drops ineligible players, then applies the tie-breaking rules above:
+
+```python
+def _select_role_holder(self, ranked_players, current_holder_id=None,
+                        excluded_user_ids=None):
+    excluded_user_ids = excluded_user_ids or set()
+    candidates = [p for p in ranked_players if p['user_id'] not in excluded_user_ids]
+    if not candidates:
+        return None
+
+    top_wins = max(p['wins'] for p in candidates)
+    tied = [p for p in candidates if p['wins'] == top_wins]
+
+    if len(tied) > 1 and current_holder_id is not None:
+        for player in tied:
+            if player['user_id'] == current_holder_id:
+                return player
+
+    return tied[0]
 ```
 
 ## Assignment Rules
 
 1. **No Role Stacking**: Players can only hold one role at a time
 2. **Eligibility Checks**: Each role has specific eligibility requirements
-3. **Current Role Protection**: Players cannot be assigned the same role they already hold
+3. **Incumbent Advantage**: On a tie, the current holder keeps the role
 4. **Hierarchical Priority**: Higher roles take precedence in eligibility checks
 5. **Statistical Merit**: Performance over different time periods determines role eligibility
+6. **No Empty Ranks**: A role is only vacated when nobody is eligible for it
 
 ## Database Management
 

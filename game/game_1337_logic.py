@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, date, time, timedelta
 import random
 import re
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Set
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -490,6 +490,43 @@ class Game1337Logic:
             game_date = self.get_game_date()
         return self.db_manager.get_daily_bets(game_date)
 
+    def _select_role_holder(
+        self,
+        ranked_players: List[Dict[str, Any]],
+        current_holder_id: Optional[int] = None,
+        excluded_user_ids: Optional[Set[int]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Pick the holder of a win-count based role.
+
+        `ranked_players` comes from get_winner_stats(), which orders by wins
+        descending and then by most recent win. Players in `excluded_user_ids`
+        (the General, when picking a Commander) are dropped before ranking, so
+        an ineligible player can never block the role for everybody else.
+
+        A tie on the top win count is resolved in favour of the current holder,
+        so nobody loses a role just because someone else caught up with them.
+        With no incumbent among the tied players, the most recent win breaks the
+        tie. The role is only left vacant when there is no eligible player at
+        all.
+        """
+        excluded_user_ids = excluded_user_ids or set()
+        candidates = [
+            p for p in ranked_players if p["user_id"] not in excluded_user_ids
+        ]
+        if not candidates:
+            return None
+
+        top_wins = max(p["wins"] for p in candidates)
+        tied = [p for p in candidates if p["wins"] == top_wins]
+
+        if len(tied) > 1 and current_holder_id is not None:
+            for player in tied:
+                if player["user_id"] == current_holder_id:
+                    return player
+
+        return tied[0]
+
     def determine_new_role_assignments(
         self, winner_today: Dict[str, Any], current_roles: Dict[str, Any], guild_id: int
     ) -> Dict[str, int]:
@@ -510,64 +547,31 @@ class Game1337Logic:
         top_365_players = self.get_winner_stats(days=365)
         top_14_players = self.get_winner_stats(days=14)
 
-        # 1. General: Player who has won MORE games in past 365 days than any other player
-        if top_365_players and len(top_365_players) >= 2:
-            top_player = top_365_players[0]
-            second_player = top_365_players[1]
+        current_general_id = (current_roles.get("general") or {}).get("user_id")
+        current_commander_id = (current_roles.get("commander") or {}).get("user_id")
 
-            # Assign General if top player has MORE wins than second place
-            if top_player["wins"] > second_player["wins"]:
-                assignments["general"] = top_player["user_id"]
-        elif top_365_players and len(top_365_players) == 1:
-            # If only one player has wins, they become General
-            assignments["general"] = top_365_players[0]["user_id"]
+        # 1. General: Player with the most wins in the past 365 days
+        general = self._select_role_holder(top_365_players, current_general_id)
+        if general:
+            assignments["general"] = general["user_id"]
 
-        # 2. Commander: Player who has won most games in past 14 days and is not General
-        if top_14_players:
-            general_id = assignments.get("general")
-            commander_candidate = None
-
-            # Special case: If General also has most 14-day wins, pick second place
-            if (
-                len(top_14_players) >= 2
-                and general_id
-                and top_14_players[0]["user_id"] == general_id
-            ):
-                # Pick second place as Commander if they have more wins than 3rd place
-                second_place = top_14_players[1]
-                if len(top_14_players) >= 3:
-                    third_place = top_14_players[2]
-                    if second_place["wins"] > third_place["wins"]:
-                        commander_candidate = second_place
-                else:
-                    # Only one other player besides General, they become Commander
-                    commander_candidate = second_place
-
-            # Normal case: Top 14-day player who is not General and has more wins than 2nd place
-            elif len(top_14_players) >= 2:
-                top_player = top_14_players[0]
-                second_player = top_14_players[1]
-                if (
-                    top_player["user_id"] != general_id
-                    and top_player["wins"] > second_player["wins"]
-                ):
-                    commander_candidate = top_player
-            elif (
-                len(top_14_players) == 1 and top_14_players[0]["user_id"] != general_id
-            ):
-                # Only one player with wins and not General, they become Commander
-                commander_candidate = top_14_players[0]
-
-            if commander_candidate:
-                assignments["commander"] = commander_candidate["user_id"]
+        # 2. Commander: Player with the most wins in the past 14 days, General aside
+        general_id = assignments.get("general") or current_general_id
+        commander = self._select_role_holder(
+            top_14_players,
+            current_commander_id,
+            excluded_user_ids={general_id} if general_id else None,
+        )
+        if commander:
+            assignments["commander"] = commander["user_id"]
 
         # 3. Sergeant: Today's winner who is not General or Commander
-        general_id = assignments.get("general")
-        commander_id = assignments.get("commander")
+        new_general_id = assignments.get("general")
+        new_commander_id = assignments.get("commander")
 
         if (
-            winner_today["user_id"] != general_id
-            and winner_today["user_id"] != commander_id
+            winner_today["user_id"] != new_general_id
+            and winner_today["user_id"] != new_commander_id
         ):
             assignments["sergeant"] = winner_today["user_id"]
 
