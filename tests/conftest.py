@@ -30,6 +30,7 @@ class FakeDB:
     def __init__(self):
         self.bets = []
         self.winners = []
+        self.win_times = {}
         self.role_assignments = {}
 
     # --- bets -------------------------------------------------------------
@@ -88,6 +89,14 @@ class FakeDB:
             }
             for b in rows
         ]
+
+    # --- win times --------------------------------------------------------
+
+    def get_1337_win_time(self, game_date):
+        return self.win_times.get(game_date)
+
+    def save_1337_win_time(self, game_date, win_time):
+        return self.win_times.setdefault(game_date, win_time)
 
     # --- winners ----------------------------------------------------------
 

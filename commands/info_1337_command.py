@@ -170,13 +170,51 @@ class Info1337Command(commands.Cog):
                 )
                 embed.color = 0x888888  # Gray for non-participant
         else:
-            # No winner yet or catastrophic event
-            embed.add_field(
-                name="⏳ Status",
-                value="**Game ended but results are still being calculated...**\nCheck back in a moment!",
-                inline=False,
-            )
-            embed.color = 0xFFAA00  # Orange for pending
+            win_time = self.game_logic.get_daily_win_time(game_date)
+            reason = self.game_logic.explain_missing_winner(daily_bets, win_time)
+
+            if reason is None:
+                # A valid winner exists but the scheduler has not saved it yet
+                embed.add_field(
+                    name="⏳ Status",
+                    value="**Game ended but results are still being calculated...**\nCheck back in a moment!",
+                    inline=False,
+                )
+                embed.color = 0xFFAA00  # Orange for pending
+            else:
+                reason_text = {
+                    "no_bets": "Nobody placed a bet today.",
+                    "all_late": "Every bet was after the win time.",
+                    "catastrophic": "The closest players had the exact same time.",
+                }[reason]
+                embed.add_field(
+                    name="📅 Game Status",
+                    value=f"🤷 **No winner today!**\n{reason_text}",
+                    inline=False,
+                )
+                embed.add_field(
+                    name="🎯 Win Time",
+                    value=f"`{self.game_logic.format_time_with_ms(win_time)}`",
+                    inline=True,
+                )
+                embed.add_field(
+                    name="👥 Total Players", value=f"**{num_players}**", inline=True
+                )
+
+                if user_bet:
+                    millisecond_diff = self.game_logic.calculate_millisecond_difference(
+                        user_bet["play_time"], win_time
+                    )
+                    bet_type_emoji = (
+                        "🐦" if user_bet["bet_type"] == "early_bird" else "⚡"
+                    )
+                    embed.add_field(
+                        name="📊 Your Performance",
+                        value=f"{bet_type_emoji} **Your bet:** `{self.game_logic.format_time_with_ms(user_bet['play_time'])}`\n"
+                        f"⏱️ **Distance from win:** `{abs(millisecond_diff)}ms` {'before' if millisecond_diff >= 0 else 'after'}",
+                        inline=False,
+                    )
+                embed.color = 0x888888  # Gray for no winner
 
         from config import Config
 

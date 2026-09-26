@@ -49,7 +49,9 @@ class Game1337Logic:
     def get_daily_win_time(self, game_date: Optional[date] = None) -> datetime:
         """
         Get or generate the daily win time for a specific date.
-        The win time is generated only once per day and cached in memory.
+        The win time is generated only once per day and stored in the database,
+        so every cog and a restarted pod see the same value. It is also cached
+        in memory to avoid a DB round-trip per call.
         """
         if game_date is None:
             game_date = self.get_game_date()
@@ -61,6 +63,14 @@ class Game1337Logic:
             )
             return self._daily_win_times[game_date]
 
+        stored = self.db_manager.get_1337_win_time(game_date)
+        if stored is not None:
+            self._daily_win_times[game_date] = stored
+            logger.info(
+                f"Loaded stored win time for {game_date}: {self.format_time_with_ms(stored)}"
+            )
+            return stored
+
         # Generate new win time for this date
         game_start_time = self.parse_game_start_time()
         game_datetime = datetime.combine(game_date, game_start_time)
@@ -69,7 +79,15 @@ class Game1337Logic:
         random_ms = random.randint(0, 60000)
         win_time = game_datetime + timedelta(milliseconds=random_ms)
 
-        # Cache the win time
+        # Persist it; if another caller stored one first, use theirs.
+        saved = self.db_manager.save_1337_win_time(game_date, win_time)
+        if saved is None:
+            logger.warning(
+                f"Could not store win time for {game_date}; using in-memory value only"
+            )
+        else:
+            win_time = saved
+
         self._daily_win_times[game_date] = win_time
 
         logger.info(
@@ -245,6 +263,24 @@ class Game1337Logic:
         winner_data["millisecond_diff"] = millisecond_diff
         winner_data["win_time"] = win_time
         return winner_data
+
+    def explain_missing_winner(
+        self, daily_bets: List[Dict[str, Any]], win_time: datetime
+    ) -> Optional[str]:
+        """Say why a game whose win time has passed has no winner row.
+
+        Returns 'no_bets', 'all_late' (every bet was after the win time),
+        'catastrophic' (identical closest times), or None when a winner
+        exists but is not saved yet.
+        """
+        if not daily_bets:
+            return "no_bets"
+        if all(bet["play_time"] > win_time for bet in daily_bets):
+            return "all_late"
+        result = self._select_winner_from_bets(daily_bets, win_time)
+        if result and result.get("catastrophic_event"):
+            return "catastrophic"
+        return None
 
     def determine_winner(
         self, game_date: date, win_time: datetime

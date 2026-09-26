@@ -128,6 +128,16 @@ class DatabaseManager:
                 )
             """)
 
+            # One row per game day so every Game1337Logic instance (and a
+            # restarted pod) agrees on the same random win time.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS game_1337_win_times (
+                    game_date DATE PRIMARY KEY,
+                    win_time DATETIME(3) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS game_1337_roles (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -918,6 +928,53 @@ class DatabaseManager:
             return None
         except mariadb.Error as e:
             logger.error(f"Error fetching daily winner: {e}")
+            return None
+        finally:
+            if connection:
+                connection.close()
+
+    def get_1337_win_time(self, game_date):
+        """Return the stored win time for game_date, or None if none is stored."""
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT win_time FROM game_1337_win_times WHERE game_date = ?",
+                (game_date,),
+            )
+            result = cursor.fetchone()
+            return result[0] if result else None
+        except mariadb.Error as e:
+            logger.error(f"Error fetching 1337 win time: {e}")
+            return None
+        finally:
+            if connection:
+                connection.close()
+
+    def save_1337_win_time(self, game_date, win_time):
+        """Store win_time for game_date unless one exists; return the stored value.
+
+        First writer wins, so concurrent callers all get the same win time.
+        Returns None on database error.
+        """
+        connection = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(
+                "INSERT IGNORE INTO game_1337_win_times (game_date, win_time) VALUES (?, ?)",
+                (game_date, win_time),
+            )
+            connection.commit()
+            cursor.execute(
+                "SELECT win_time FROM game_1337_win_times WHERE game_date = ?",
+                (game_date,),
+            )
+            result = cursor.fetchone()
+            return result[0] if result else None
+        except mariadb.Error as e:
+            logger.error(f"Error saving 1337 win time: {e}")
             return None
         finally:
             if connection:
