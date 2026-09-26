@@ -22,6 +22,9 @@ class Game1337Logic:
     FAR_OFF_THRESHOLD_MS = 30000
     # Call out players who overshot the win time by no more than this.
     OVERSHOOT_THRESHOLD_MS = 5000
+    # The scheduler saves the winner moments after the win time; with no
+    # winner row after this long, nothing is still being calculated.
+    RESULT_GRACE_SECONDS = 60
 
     def __init__(self, db_manager):
         self.db_manager = db_manager
@@ -265,22 +268,42 @@ class Game1337Logic:
         return winner_data
 
     def explain_missing_winner(
-        self, daily_bets: List[Dict[str, Any]], win_time: datetime
-    ) -> Optional[str]:
+        self,
+        daily_bets: List[Dict[str, Any]],
+        win_time: datetime,
+        current_time: Optional[datetime] = None,
+    ) -> str:
         """Say why a game whose win time has passed has no winner row.
 
         Returns 'no_bets', 'all_late' (every bet was after the win time),
-        'catastrophic' (identical closest times), or None when a winner
-        exists but is not saved yet.
+        'catastrophic' (identical closest times), 'pending' (a winner exists
+        and the scheduler may still be saving it), or 'unknown' (a winner
+        exists but none was saved in time, e.g. the bot was offline at
+        game time or the win time was re-rolled after a restart).
         """
+        if current_time is None:
+            current_time = datetime.now()
+
         if not daily_bets:
             return "no_bets"
-        if all(bet["play_time"] > win_time for bet in daily_bets):
+        valid_bets = [bet for bet in daily_bets if bet["play_time"] <= win_time]
+        if not valid_bets:
             return "all_late"
-        result = self._select_winner_from_bets(daily_bets, win_time)
-        if result and result.get("catastrophic_event"):
+
+        # Mirrors _select_winner_from_bets without its "Winner: ..." log line.
+        if len(valid_bets) == 1:
+            closest = valid_bets[0]
+        else:
+            closest = self._apply_winner_selection_rules(valid_bets, win_time)
+        if (
+            closest
+            and sum(bet["play_time"] == closest["play_time"] for bet in valid_bets) > 1
+        ):
             return "catastrophic"
-        return None
+
+        if current_time <= win_time + timedelta(seconds=self.RESULT_GRACE_SECONDS):
+            return "pending"
+        return "unknown"
 
     def determine_winner(
         self, game_date: date, win_time: datetime

@@ -80,9 +80,20 @@ def test_explain_catastrophic():
     )
 
 
-def test_explain_winner_pending():
+def test_explain_winner_pending_right_after_win_time():
     bets = [_bet(1, "a", WIN_TIME - timedelta(milliseconds=100))]
-    assert Game1337Logic(FakeDB()).explain_missing_winner(bets, WIN_TIME) is None
+    now = WIN_TIME + timedelta(seconds=2)
+    assert (
+        Game1337Logic(FakeDB()).explain_missing_winner(bets, WIN_TIME, now) == "pending"
+    )
+
+
+def test_explain_unknown_when_no_result_saved_long_after_win_time():
+    bets = [_bet(1, "a", WIN_TIME - timedelta(milliseconds=100))]
+    now = WIN_TIME + timedelta(hours=10)
+    assert (
+        Game1337Logic(FakeDB()).explain_missing_winner(bets, WIN_TIME, now) == "unknown"
+    )
 
 
 # --- /1337-info embed ------------------------------------------------------
@@ -109,12 +120,35 @@ def test_info_shows_no_winner_when_all_bets_late():
     assert "⏳ Status" not in fields
 
 
-def test_info_still_pending_when_valid_winner_not_saved():
+def test_info_still_pending_right_after_win_time():
+    now = datetime.now()
+    game_date = now.date()
+    win_time = now - timedelta(seconds=1)
     db = FakeDB()
-    db.win_times[GAME_DATE] = WIN_TIME
-    db.bets = [_bet(1, "early", WIN_TIME - timedelta(milliseconds=100), "regular")]
+    db.win_times[game_date] = win_time
+    bet = _bet(1, "early", win_time - timedelta(milliseconds=100), "regular")
+    bet["game_date"] = game_date
+    db.bets = [bet]
     cog = Info1337Command(None, db)
 
-    fields = _fields(cog._create_post_game_embed(None, GAME_DATE))
+    fields = _fields(cog._create_post_game_embed(None, game_date))
 
     assert "still being calculated" in fields["⏳ Status"]
+
+
+def test_info_no_winner_when_result_missing_long_after_win_time():
+    # 2026-09-26: the win time was re-rolled after a restart, so a bet sits
+    # before it but the scheduler never saved a winner.
+    db = FakeDB()
+    db.win_times[GAME_DATE] = datetime(2026, 9, 26, 13, 37, 59, 529000)
+    bet = _bet(1, "oglimmer", datetime(2026, 9, 26, 13, 37, 34))
+    db.bets = [bet]
+    cog = Info1337Command(None, db)
+
+    fields = _fields(cog._create_post_game_embed(bet, GAME_DATE))
+
+    assert "⏳ Status" not in fields
+    assert "No winner today" in fields["📅 Game Status"]
+    assert "No result was saved" in fields["📅 Game Status"]
+    assert "🎯 Win Time" not in fields
+    assert "📊 Your Performance" not in fields

@@ -173,8 +173,8 @@ class Info1337Command(commands.Cog):
             win_time = self.game_logic.get_daily_win_time(game_date)
             reason = self.game_logic.explain_missing_winner(daily_bets, win_time)
 
-            if reason is None:
-                # A valid winner exists but the scheduler has not saved it yet
+            if reason == "pending":
+                # A valid winner exists and the scheduler is saving it right now
                 embed.add_field(
                     name="⏳ Status",
                     value="**Game ended but results are still being calculated...**\nCheck back in a moment!",
@@ -186,22 +186,26 @@ class Info1337Command(commands.Cog):
                     "no_bets": "Nobody placed a bet today.",
                     "all_late": "Every bet was after the win time.",
                     "catastrophic": "The closest players had the exact same time.",
+                    "unknown": "No result was saved for today's game.",
                 }[reason]
                 embed.add_field(
                     name="📅 Game Status",
                     value=f"🤷 **No winner today!**\n{reason_text}",
                     inline=False,
                 )
-                embed.add_field(
-                    name="🎯 Win Time",
-                    value=f"`{self.game_logic.format_time_with_ms(win_time)}`",
-                    inline=True,
-                )
+                # With no saved result, the win time may not be the one the
+                # game used, so do not show it or distances measured from it.
+                if reason != "unknown":
+                    embed.add_field(
+                        name="🎯 Win Time",
+                        value=f"`{self.game_logic.format_time_with_ms(win_time)}`",
+                        inline=True,
+                    )
                 embed.add_field(
                     name="👥 Total Players", value=f"**{num_players}**", inline=True
                 )
 
-                if user_bet:
+                if user_bet and reason != "unknown":
                     millisecond_diff = self.game_logic.calculate_millisecond_difference(
                         user_bet["play_time"], win_time
                     )
